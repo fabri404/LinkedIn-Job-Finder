@@ -1,0 +1,5 @@
+.env
+cv.pdf
+sent_emails.txt
+__pycache__/
+*.pyc
