@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkedIn Job Finder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --accent: #0077b5; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* Pulsing badge */
+    @keyframes pulse-yellow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .badge-running { animation: pulse-yellow 1.4s ease-in-out infinite; }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; }
+
+    /* Toast slide-in */
+    @keyframes slideIn {
+      from { transform: translateX(110%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+    @keyframes slideOut {
+      from { transform: translateX(0);   opacity: 1; }
+      to   { transform: translateX(110%); opacity: 0; }
+    }
+    .toast-in  { animation: slideIn 0.3s ease forwards; }
+    .toast-out { animation: slideOut 0.3s ease forwards; }
+
+    /* Active nav item */
+    .nav-item.active {
+      background: #0077b5;
+      color: #fff;
+    }
+    .nav-item { transition: background 0.15s, color 0.15s; }
+
+    /* Table row hover */
+    .tbl-row:hover { background: #263548; }
+    .tbl-row-expand { background: #162032 !important; }
+
+    /* Expandable jobs */
+    .expand-jobs { display: none; }
+    .expand-jobs.open { display: table-row; }
+
+    /* Modal backdrop */
+    #modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
+    }
+    #modal-backdrop.hidden { display: none; }
+
+    /* Focus ring */
+    input:focus, select:focus, textarea:focus {
+      outline: 2px solid #0077b5;
+      outline-offset: 1px;
+    }
+  </style>
+</head>
+
+<body class="bg-[#0f172a] text-slate-200 min-h-screen flex flex-col">
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="bg-[#0c1424] border-b border-slate-700 px-6 py-3 flex items-center justify-between flex-shrink-0">
+  <div class="flex items-center gap-3">
+    <svg class="w-7 h-7" viewBox="0 0 24 24" fill="#0077b5">
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+    </svg>
+    <span class="font-bold text-lg tracking-wide">LinkedIn Job Finder</span>
+  </div>
+  <div id="session-status" class="flex items-center gap-2 text-sm">
+    <span class="w-2 h-2 rounded-full bg-slate-500" id="session-dot"></span>
+    <span id="session-label" class="text-slate-400">Sin sesión</span>
+    <button id="btn-logout" onclick="logout()"
+      class="hidden ml-2 text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 transition">
+      Cerrar sesión
+    </button>
+  </div>
+</header>
+
+<!-- ═══════════ BODY ═══════════ -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- SIDEBAR -->
+  <nav class="w-52 flex-shrink-0 bg-[#0c1424] border-r border-slate-700 flex flex-col py-4 gap-1 px-2">
+    <button onclick="showTab('login')"    class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="login">
+      🔐 Login
+    </button>
+    <button onclick="showTab('keywords')" class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="keywords">
+      🏷️ Keywords
+    </button>
+    <button onclick="showTab('search')"   class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="search">
+      🔍 Nueva búsqueda
+    </button>
+    <button onclick="showTab('history')"  class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="history">
+      📋 Historial
+    </button>
+    <button onclick="showTab('jobs')"     class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="jobs">
+      💼 Jobs
+    </button>
+    <button onclick="showTab('emails')"   class="nav-item text-left px-4 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700" data-tab="emails">
+      📧 Emails enviados
+    </button>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="flex-1 overflow-y-auto p-6">
+
+    <!-- ─── TAB: LOGIN ─── -->
+    <section id="tab-login" class="tab-panel max-w-md mx-auto">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-8">
+        <h2 class="text-xl font-bold mb-6 text-white">Iniciar sesión</h2>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm text-slate-400 mb-1">Usuario</label>
+            <input id="login-user" type="text" placeholder="admin"
+              class="w-full bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500" />
+          </div>
+          <div>
+            <label class="block text-sm text-slate-400 mb-1">Contraseña</label>
+            <input id="login-pass" type="password" placeholder="••••••••"
+              class="w-full bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500"
+              onkeydown="if(event.key==='Enter') login()" />
+          </div>
+          <button onclick="login()"
+            class="w-full py-3 rounded-lg font-semibold text-white transition-all"
+            style="background:#0077b5" onmouseover="this.style.background='#005e8f'" onmouseout="this.style.background='#0077b5'">
+            Iniciar sesión
+          </button>
+        </div>
+        <div id="token-display" class="hidden mt-5 p-4 bg-[#0f172a] border border-slate-700 rounded-lg">
+          <p class="text-xs text-slate-400 mb-1">Token activo:</p>
+          <code id="token-text" class="text-xs text-green-400 break-all"></code>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: KEYWORDS ─── -->
+    <section id="tab-keywords" class="tab-panel hidden">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-xl font-bold text-white">Keywords activas</h2>
+          <span id="kw-spinner" class="hidden">
+            <svg class="spinner w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+          </span>
+        </div>
+
+        <!-- Add form -->
+        <div class="flex gap-2 mb-5">
+          <input id="kw-input" type="text" placeholder="Nueva keyword (ej: python, django…)"
+            class="flex-1 bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-white placeholder-slate-500"
+            onkeydown="if(event.key==='Enter') addKeyword()" />
+          <button onclick="addKeyword()"
+            class="px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition"
+            style="background:#0077b5" onmouseover="this.style.background='#005e8f'" onmouseout="this.style.background='#0077b5'">
+            Agregar
+          </button>
+        </div>
+
+        <!-- Table -->
+        <div class="overflow-x-auto rounded-lg border border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="bg-[#162032] text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-3 text-left">Palabra</th>
+                <th class="px-4 py-3 text-left">Activa</th>
+                <th class="px-4 py-3 text-left">Creada</th>
+                <th class="px-4 py-3 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="kw-table-body">
+              <tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: NUEVA BÚSQUEDA ─── -->
+    <section id="tab-search" class="tab-panel hidden max-w-lg mx-auto">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-8 text-center">
+        <h2 class="text-xl font-bold text-white mb-2">Nueva búsqueda en LinkedIn</h2>
+        <p class="text-slate-400 text-sm mb-8">El scraper abrirá LinkedIn y buscará ofertas usando tus keywords.</p>
+
+        <div class="mb-6">
+          <label class="block text-sm text-slate-400 mb-2 text-left font-medium">Modo de búsqueda</label>
+          <div class="grid grid-cols-2 gap-3">
+            <label id="mode-jobs-label" onclick="setSearchMode('jobs')"
+              class="cursor-pointer border-2 border-blue-500 bg-blue-500/10 rounded-xl p-4 text-left transition-all">
+              <input type="radio" name="search-mode" value="jobs" class="hidden" checked />
+              <div class="text-white font-semibold text-sm">🎯 Jobs Search</div>
+              <div class="text-slate-400 text-xs mt-1">Busca directamente en LinkedIn Jobs con tus keywords. Resultados más relevantes.</div>
+            </label>
+            <label id="mode-feed-label" onclick="setSearchMode('feed')"
+              class="cursor-pointer border-2 border-slate-600 bg-slate-800 rounded-xl p-4 text-left transition-all">
+              <input type="radio" name="search-mode" value="feed" class="hidden" />
+              <div class="text-white font-semibold text-sm">📰 Feed Scan</div>
+              <div class="text-slate-400 text-xs mt-1">Scrollea el feed general y filtra posts por keywords. Modo legacy.</div>
+            </label>
+          </div>
+        </div>
+
+        <div class="mb-8" id="scroll-duration-group" style="display:none">
+          <label class="block text-sm text-slate-400 mb-2 text-left">Segundos de scroll <span class="text-slate-500">(modo Feed)</span></label>
+          <input id="scroll-duration" type="number" value="60" min="10" max="300"
+            class="w-full bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-3 text-white text-center text-2xl font-bold" />
+          <p class="text-xs text-slate-500 mt-1 text-left">Mínimo 10 · Máximo 300</p>
+        </div>
+
+        <button id="btn-start-search" onclick="startSearch()"
+          class="w-full py-4 rounded-xl text-lg font-bold text-white transition-all shadow-lg"
+          style="background:#0077b5"
+          onmouseover="this.style.background='#005e8f'" onmouseout="this.style.background='#0077b5'">
+          🔍 Iniciar búsqueda en LinkedIn
+        </button>
+
+        <div id="search-started-msg" class="hidden mt-6 p-4 bg-[#0f172a] border border-yellow-600/40 rounded-xl">
+          <div class="flex items-center gap-3">
+            <span class="w-3 h-3 rounded-full bg-yellow-400 badge-running flex-shrink-0"></span>
+            <div class="text-left">
+              <p class="text-yellow-300 font-semibold text-sm" id="search-started-text"></p>
+              <p class="text-slate-400 text-xs mt-0.5">Revisá el historial en unos minutos</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: HISTORIAL ─── -->
+    <section id="tab-history" class="tab-panel hidden">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h2 class="text-xl font-bold text-white">Historial de búsquedas</h2>
+          <div class="flex items-center gap-3 flex-wrap">
+            <span id="history-auto-badge" class="hidden text-xs px-2 py-1 rounded bg-yellow-900/40 text-yellow-400 border border-yellow-700/40">
+              Auto-refresh activo
+            </span>
+            <button onclick="loadHistory()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Actualizar
+            </button>
+            <button onclick="clearHistory()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-900/40 hover:bg-red-900/70 text-red-400 border border-red-800/40 transition">
+              🗑 Limpiar todo
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="bg-[#162032] text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-3 text-left">ID</th>
+                <th class="px-4 py-3 text-left">Fecha inicio</th>
+                <th class="px-4 py-3 text-left">Scroll (s)</th>
+                <th class="px-4 py-3 text-left">Estado</th>
+                <th class="px-4 py-3 text-left">Encontrados</th>
+                <th class="px-4 py-3 text-left">Verificados</th>
+                <th class="px-4 py-3 text-left">Duración</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body">
+              <tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: JOBS ─── -->
+    <section id="tab-jobs" class="tab-panel hidden">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h2 class="text-xl font-bold text-white">Jobs encontrados</h2>
+          <div class="flex items-center gap-4 flex-wrap">
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input type="checkbox" id="filter-verified" onchange="loadJobs()"
+                class="w-4 h-4 rounded accent-[#0077b5]" />
+              Solo verificados
+            </label>
+            <select id="filter-session" onchange="loadJobs()"
+              class="bg-[#0f172a] border border-slate-600 rounded-lg px-3 py-2 text-sm text-white">
+              <option value="">Todas las búsquedas</option>
+            </select>
+            <button onclick="loadJobs()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Actualizar
+            </button>
+            <button onclick="clearJobs()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-900/40 hover:bg-red-900/70 text-red-400 border border-red-800/40 transition">
+              🗑 Limpiar todo
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="bg-[#162032] text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-3 text-left">Puesto / Empresa</th>
+                <th class="px-4 py-3 text-left">Ubicación</th>
+                <th class="px-4 py-3 text-left">Score</th>
+                <th class="px-4 py-3 text-left">Verificado</th>
+                <th class="px-4 py-3 text-left">Emails</th>
+                <th class="px-4 py-3 text-left">Acción</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-table-body">
+              <tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination -->
+        <div id="jobs-pagination" class="flex items-center justify-between mt-4 text-sm text-slate-400"></div>
+      </div>
+    </section>
+
+    <!-- ─── TAB: EMAILS ─── -->
+    <section id="tab-emails" class="tab-panel hidden">
+      <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-6">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h2 class="text-xl font-bold text-white">Emails enviados</h2>
+          <div class="flex items-center gap-3">
+            <button onclick="loadEmails()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-slate-700 hover:bg-slate-600 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Actualizar
+            </button>
+            <button onclick="clearEmails()"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-900/40 hover:bg-red-900/70 text-red-400 border border-red-800/40 transition">
+              🗑 Limpiar todo
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="bg-[#162032] text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-3 text-left">Destinatario</th>
+                <th class="px-4 py-3 text-left">Job</th>
+                <th class="px-4 py-3 text-left">Idioma</th>
+                <th class="px-4 py-3 text-left">Asunto</th>
+                <th class="px-4 py-3 text-left">Fecha</th>
+                <th class="px-4 py-3 text-left">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="emails-table-body">
+              <tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Cargando…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ═══════════ TOAST CONTAINER ═══════════ -->
+<div id="toast-container" class="fixed bottom-6 right-6 flex flex-col gap-2 z-50 pointer-events-none" style="max-width:360px"></div>
+
+<!-- ═══════════ MODAL ═══════════ -->
+<div id="modal-backdrop" class="hidden">
+  <div class="bg-[#1e293b] border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
+    <h3 class="text-lg font-bold text-white mb-5">📧 Enviar CV</h3>
+    <input type="hidden" id="modal-job-id" />
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm text-slate-400 mb-1">Email destino</label>
+        <input id="modal-to-email" type="email"
+          class="w-full bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-white" />
+      </div>
+      <div>
+        <label class="block text-sm text-slate-400 mb-1">Idioma del correo</label>
+        <select id="modal-language"
+          class="w-full bg-[#0f172a] border border-slate-600 rounded-lg px-4 py-2.5 text-sm text-white">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </div>
+    <div class="flex gap-3 mt-6">
+      <button onclick="closeModal()"
+        class="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-slate-700 hover:bg-slate-600 transition text-white">
+        Cancelar
+      </button>
+      <button id="modal-confirm-btn" onclick="confirmSendEmail()"
+        class="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition"
+        style="background:#0077b5" onmouseover="this.style.background='#005e8f'" onmouseout="this.style.background='#0077b5'">
+        Confirmar envío
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────
+// CONSTANTS & STATE
+// ─────────────────────────────────────────────
+const API = '';  // same origin
+let autoRefreshTimer = null;
+let jobsCurrentPage = 1;
+
+// ─────────────────────────────────────────────
+// TOKEN HELPERS
+// ─────────────────────────────────────────────
+function getToken() {
+  return localStorage.getItem('djtoken');
+}
+
+function setToken(token) {
+  localStorage.setItem('djtoken', token);
+  updateSessionStatus(true);
+  document.getElementById('token-text').textContent = token;
+  document.getElementById('token-display').classList.remove('hidden');
+}
+
+function clearToken() {
+  localStorage.removeItem('djtoken');
+  updateSessionStatus(false);
+  document.getElementById('token-display').classList.add('hidden');
+}
+
+function updateSessionStatus(loggedIn) {
+  const dot   = document.getElementById('session-dot');
+  const label = document.getElementById('session-label');
+  const btn   = document.getElementById('btn-logout');
+  if (loggedIn) {
+    dot.className   = 'w-2 h-2 rounded-full bg-green-400';
+    label.textContent = 'Sesión activa';
+    label.className   = 'text-green-400';
+    btn.classList.remove('hidden');
+  } else {
+    dot.className   = 'w-2 h-2 rounded-full bg-slate-500';
+    label.textContent = 'Sin sesión';
+    label.className   = 'text-slate-400';
+    btn.classList.add('hidden');
+  }
+}
+
+function logout() {
+  clearToken();
+  showTab('login');
+  showToast('Sesión cerrada', 'info');
+}
+
+// ─────────────────────────────────────────────
+// FETCH WRAPPER
+// ─────────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers['Authorization'] = `Token ${token}`;
+
+  const response = await fetch(API + path, { ...options, headers });
+
+  if (response.status === 401 || response.status === 403) {
+    clearToken();
+    showTab('login');
+    showToast('Sesión expirada, iniciá sesión nuevamente', 'error');
+    throw new Error('Unauthorized');
+  }
+
+  return response;
+}
+
+// ─────────────────────────────────────────────
+// TOAST NOTIFICATIONS
+// ─────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const colors = {
+    success : 'bg-green-900/90 border-green-700 text-green-200',
+    error   : 'bg-red-900/90   border-red-700   text-red-200',
+    info    : 'bg-slate-800     border-slate-600  text-slate-200',
+    warning : 'bg-yellow-900/90 border-yellow-700 text-yellow-200',
+  };
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+
+  const el = document.createElement('div');
+  el.className = `toast-in pointer-events-auto border rounded-lg px-4 py-3 text-sm flex items-start gap-2 shadow-xl ${colors[type] || colors.info}`;
+  el.innerHTML = `<span>${icons[type] || icons.info}</span><span class="flex-1">${message}</span>`;
+  container.appendChild(el);
+
+  setTimeout(() => {
+    el.classList.replace('toast-in', 'toast-out');
+    setTimeout(() => el.remove(), 300);
+  }, 4000);
+}
+
+// ─────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────
+function showTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+  const panel = document.getElementById(`tab-${tab}`);
+  if (panel) panel.classList.remove('hidden');
+
+  const navBtn = document.querySelector(`[data-tab="${tab}"]`);
+  if (navBtn) navBtn.classList.add('active');
+
+  // Lazy-load data
+  if (tab === 'keywords') loadKeywords();
+  if (tab === 'history')  loadHistory();
+  if (tab === 'jobs')     { loadSessionsFilter(); loadJobs(); }
+  if (tab === 'emails')   loadEmails();
+  if (tab === 'login' && getToken()) {
+    document.getElementById('token-text').textContent = getToken();
+    document.getElementById('token-display').classList.remove('hidden');
+  }
+}
+
+// ─────────────────────────────────────────────
+// DATE FORMATTER
+// ─────────────────────────────────────────────
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function fmtDuration(secs) {
+  if (secs == null) return '—';
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs/60)}m ${secs%60}s`;
+}
+
+// ─────────────────────────────────────────────
+// STATUS BADGES
+// ─────────────────────────────────────────────
+function statusBadge(status) {
+  const map = {
+    pending   : 'bg-slate-700 text-slate-300',
+    running   : 'bg-yellow-900/60 text-yellow-300 border border-yellow-700/50 badge-running',
+    completed : 'bg-green-900/60 text-green-300 border border-green-700/50',
+    failed    : 'bg-red-900/60   text-red-300   border border-red-700/50',
+  };
+  const labels = { pending: 'Pendiente', running: 'Corriendo', completed: 'Completado', failed: 'Error' };
+  const cls = map[status] || map.pending;
+  return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${cls}">${labels[status] || status}</span>`;
+}
+
+// ─────────────────────────────────────────────
+// LOADING SPINNER IN A TABLE
+// ─────────────────────────────────────────────
+function tableLoading(tbodyId, cols) {
+  document.getElementById(tbodyId).innerHTML = `
+    <tr><td colspan="${cols}" class="px-4 py-8 text-center">
+      <div class="flex items-center justify-center gap-2 text-slate-400">
+        <svg class="spinner w-5 h-5" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Cargando…
+      </div>
+    </td></tr>`;
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 1 — LOGIN
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+async function login() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  if (!username || !password) { showToast('Completá usuario y contraseña', 'warning'); return; }
+
+  try {
+    const csrfToken = document.cookie.split(';').map(c => c.trim())
+      .find(c => c.startsWith('csrftoken='))?.split('=')?.[1] || '';
+    const res = await fetch(`${API}/api/auth/token/`, {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body   : JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.non_field_errors?.[0] || 'Credenciales incorrectas', 'error');
+      return;
+    }
+    const data = await res.json();
+    setToken(data.token);
+    showToast('Sesión iniciada correctamente', 'success');
+    showTab('keywords');
+  } catch (e) {
+    showToast('Error de conexión con el servidor', 'error');
+  }
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 2 — KEYWORDS
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+async function loadKeywords() {
+  const spinner = document.getElementById('kw-spinner');
+  const tbody   = document.getElementById('kw-table-body');
+  spinner.classList.remove('hidden');
+  tableLoading('kw-table-body', 4);
+
+  try {
+    const res  = await apiFetch('/api/keywords/');
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.results || []);
+
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-slate-500">No hay keywords todavía.</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(kw => `
+        <tr class="tbl-row border-t border-slate-700/50">
+          <td class="px-4 py-3 font-medium text-white">${kw.word}</td>
+          <td class="px-4 py-3">${kw.is_active ? '<span class="text-green-400">✅ Activa</span>' : '<span class="text-slate-500">❌ Inactiva</span>'}</td>
+          <td class="px-4 py-3 text-slate-400 text-xs">${fmtDate(kw.created_at)}</td>
+          <td class="px-4 py-3 text-right">
+            <button onclick="deleteKeyword(${kw.id})"
+              class="px-3 py-1 text-xs rounded bg-red-900/40 text-red-400 hover:bg-red-900/70 border border-red-800/40 transition">
+              Eliminar
+            </button>
+          </td>
+        </tr>`).join('');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized')
+      tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-red-400">Error al cargar keywords.</td></tr>`;
+  } finally {
+    spinner.classList.add('hidden');
+  }
+}
+
+async function addKeyword() {
+  const input = document.getElementById('kw-input');
+  const word  = input.value.trim();
+  if (!word) { showToast('Escribí una keyword primero', 'warning'); return; }
+
+  try {
+    const res = await apiFetch('/api/keywords/', {
+      method : 'POST',
+      body   : JSON.stringify({ word, is_active: true }),
+    });
+    if (res.ok) {
+      input.value = '';
+      showToast(`Keyword "${word}" agregada`, 'success');
+      loadKeywords();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.word?.[0] || 'No se pudo agregar la keyword', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  }
+}
+
+async function deleteKeyword(id) {
+  if (!confirm('¿Eliminar esta keyword?')) return;
+  try {
+    const res = await apiFetch(`/api/keywords/${id}/`, { method: 'DELETE' });
+    if (res.status === 204 || res.ok) {
+      showToast('Keyword eliminada', 'success');
+      loadKeywords();
+    } else {
+      showToast('No se pudo eliminar', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  }
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 3 — NUEVA BÚSQUEDA
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+let currentSearchMode = 'jobs';
+
+function setSearchMode(mode) {
+  currentSearchMode = mode;
+  const jobsLabel = document.getElementById('mode-jobs-label');
+  const feedLabel = document.getElementById('mode-feed-label');
+  const durationGroup = document.getElementById('scroll-duration-group');
+
+  if (mode === 'jobs') {
+    jobsLabel.className = 'cursor-pointer border-2 border-blue-500 bg-blue-500/10 rounded-xl p-4 text-left transition-all';
+    feedLabel.className = 'cursor-pointer border-2 border-slate-600 bg-slate-800 rounded-xl p-4 text-left transition-all';
+    durationGroup.style.display = 'none';
+  } else {
+    feedLabel.className = 'cursor-pointer border-2 border-blue-500 bg-blue-500/10 rounded-xl p-4 text-left transition-all';
+    jobsLabel.className = 'cursor-pointer border-2 border-slate-600 bg-slate-800 rounded-xl p-4 text-left transition-all';
+    durationGroup.style.display = 'block';
+  }
+}
+
+async function startSearch() {
+  const body = { search_mode: currentSearchMode };
+
+  if (currentSearchMode === 'feed') {
+    const input    = document.getElementById('scroll-duration');
+    const duration = parseInt(input.value, 10);
+    if (isNaN(duration) || duration < 10 || duration > 300) {
+      showToast('El tiempo de scroll debe estar entre 10 y 300 segundos', 'warning');
+      return;
+    }
+    body.scroll_duration = duration;
+  } else {
+    body.scroll_duration = 60;
+  }
+
+  const btn = document.getElementById('btn-start-search');
+  btn.disabled = true;
+  btn.textContent = 'Iniciando…';
+
+  try {
+    const res = await apiFetch('/api/searches/start/', {
+      method : 'POST',
+      body   : JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      const msg = document.getElementById('search-started-msg');
+      const modeLabel = currentSearchMode === 'jobs' ? 'Jobs Search' : 'Feed Scan';
+      document.getElementById('search-started-text').textContent =
+        `Búsqueda ${modeLabel} iniciada, ID: ${data.id} — revisá el historial en unos minutos`;
+      msg.classList.remove('hidden');
+      showToast(`Búsqueda #${data.id} iniciada`, 'success');
+      startAutoRefresh();
+    } else {
+      const err = data.error || data.scroll_duration?.[0] || data.detail || 'No se pudo iniciar la búsqueda';
+      showToast(err, 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Iniciar búsqueda en LinkedIn';
+  }
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 4 — HISTORIAL
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+async function loadHistory() {
+  tableLoading('history-table-body', 7);
+
+  try {
+    const res  = await apiFetch('/api/searches/');
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.results || []);
+
+    const tbody = document.getElementById('history-table-body');
+
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">Sin búsquedas todavía.</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(s => `
+        <tr class="tbl-row border-t border-slate-700/50 cursor-pointer" onclick="toggleSearchDetail(${s.id}, this)">
+          <td class="px-4 py-3 font-mono text-slate-300">#${s.id}</td>
+          <td class="px-4 py-3 text-slate-300 text-xs">${fmtDate(s.started_at)}</td>
+          <td class="px-4 py-3 text-slate-300">${s.scroll_duration}s</td>
+          <td class="px-4 py-3">${statusBadge(s.status)}</td>
+          <td class="px-4 py-3 text-slate-300">${s.total_found ?? '—'}</td>
+          <td class="px-4 py-3 text-slate-300">${s.total_verified ?? '—'}</td>
+          <td class="px-4 py-3 text-slate-400 text-xs">${fmtDuration(s.duration_seconds)}</td>
+        </tr>
+        <tr id="detail-row-${s.id}" class="expand-jobs tbl-row-expand">
+          <td colspan="7" class="px-6 py-4">
+            <div id="detail-content-${s.id}" class="text-slate-400 text-sm">Cargando jobs…</div>
+          </td>
+        </tr>`).join('');
+    }
+
+    // Check if any running — set auto-refresh
+    const hasRunning = items.some(s => s.status === 'running' || s.status === 'pending');
+    if (hasRunning) {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+
+  } catch (e) {
+    if (e.message !== 'Unauthorized') {
+      document.getElementById('history-table-body').innerHTML =
+        `<tr><td colspan="7" class="px-4 py-6 text-center text-red-400">Error al cargar historial.</td></tr>`;
+    }
+  }
+}
+
+async function toggleSearchDetail(id, row) {
+  const detailRow = document.getElementById(`detail-row-${id}`);
+  const content   = document.getElementById(`detail-content-${id}`);
+
+  if (detailRow.classList.contains('open')) {
+    detailRow.classList.remove('open');
+    return;
+  }
+  detailRow.classList.add('open');
+
+  // Load detail
+  try {
+    const res  = await apiFetch(`/api/searches/${id}/`);
+    const data = await res.json();
+
+    if (!data.jobs || data.jobs.length === 0) {
+      content.innerHTML = '<span class="text-slate-500">Sin jobs en esta búsqueda.</span>';
+      return;
+    }
+
+    content.innerHTML = `
+      <p class="font-semibold text-slate-300 mb-2">Jobs de la búsqueda #${id}</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="text-slate-500">
+            <tr>
+              <th class="text-left pr-4 py-1">URL</th>
+              <th class="text-left pr-4 py-1">Score</th>
+              <th class="text-left pr-4 py-1">Verificado</th>
+              <th class="text-left py-1">Emails</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.jobs.map(j => `
+              <tr class="border-t border-slate-700/30">
+                <td class="pr-4 py-1.5">
+                  <a href="${j.url}" target="_blank" class="text-blue-400 hover:underline max-w-xs block truncate" title="${j.url}">
+                    ${j.url.length > 60 ? j.url.substring(0, 60) + '…' : j.url}
+                  </a>
+                </td>
+                <td class="pr-4 py-1.5 text-slate-300">${j.score ?? '—'}</td>
+                <td class="pr-4 py-1.5">${j.is_verified ? '✅' : '❌'}</td>
+                <td class="py-1.5 text-slate-400">${(j.emails_extracted || []).join(', ') || '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    if (e.message !== 'Unauthorized')
+      content.innerHTML = '<span class="text-red-400">Error al cargar detalle.</span>';
+  }
+}
+
+// ─────────────────────────────────────────────
+// AUTO-REFRESH
+// ─────────────────────────────────────────────
+function startAutoRefresh() {
+  if (autoRefreshTimer) return;
+  document.getElementById('history-auto-badge').classList.remove('hidden');
+  autoRefreshTimer = setInterval(() => {
+    loadHistory();
+  }, 30000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  document.getElementById('history-auto-badge').classList.add('hidden');
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 5 — JOBS
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+async function loadSessionsFilter() {
+  try {
+    const res  = await apiFetch('/api/searches/');
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.results || []);
+    const sel = document.getElementById('filter-session');
+    // Keep first option
+    const current = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    items.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `Búsqueda #${s.id} (${fmtDate(s.started_at)})`;
+      sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+  } catch {}
+}
+
+async function loadJobs(page = 1) {
+  jobsCurrentPage = page;
+  tableLoading('jobs-table-body', 6);
+
+  const verified = document.getElementById('filter-verified').checked;
+  const session  = document.getElementById('filter-session').value;
+
+  let url = `/api/jobs/?page=${page}`;
+  if (verified) url += '&is_verified=true';
+  if (session)  url += `&session=${session}`;
+
+  try {
+    const res  = await apiFetch(url);
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.results || []);
+
+    const tbody = document.getElementById('jobs-table-body');
+
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Sin jobs para mostrar.</td></tr>`;
+      document.getElementById('jobs-pagination').innerHTML = '';
+    } else {
+      tbody.innerHTML = items.map(j => {
+        const shortUrl = j.url.length > 55 ? j.url.substring(0, 55) + '…' : j.url;
+        const emails   = j.emails_extracted || [];
+        const hasEmail = emails.length > 0;
+        const emailsStr = emails.join(', ') || '—';
+
+        const sendBtn = j.is_verified && hasEmail
+          ? `<button onclick="openSendModal(${j.id}, '${emails[0]}')"
+               class="px-3 py-1 text-xs rounded font-medium text-white transition"
+               style="background:#0077b5"
+               onmouseover="this.style.background='#005e8f'" onmouseout="this.style.background='#0077b5'">
+               📧 Enviar CV
+             </button>`
+          : `<span class="text-slate-600 text-xs">—</span>`;
+
+        const titleDisplay = j.title
+          ? `<a href="${j.url}" target="_blank" class="text-blue-400 hover:underline font-medium" title="${j.url}">${j.title}</a>`
+          : `<a href="${j.url}" target="_blank" class="text-blue-400 hover:underline text-xs" title="${j.url}">${shortUrl}</a>`;
+        const companyDisplay = j.company ? `<span class="text-slate-400 text-xs">${j.company}</span>` : '';
+
+        return `
+          <tr class="tbl-row border-t border-slate-700/50">
+            <td class="px-4 py-3 max-w-xs">
+              ${titleDisplay}
+              ${companyDisplay ? `<div class="mt-0.5">${companyDisplay}</div>` : ''}
+            </td>
+            <td class="px-4 py-3 text-slate-400 text-xs">${j.location || '—'}</td>
+            <td class="px-4 py-3">
+              <span class="text-slate-300 font-mono">${j.score ?? '—'}</span>
+            </td>
+            <td class="px-4 py-3">${j.is_verified ? '✅' : '❌'}</td>
+            <td class="px-4 py-3 text-slate-400 text-xs max-w-xs truncate" title="${emailsStr}">${emailsStr}</td>
+            <td class="px-4 py-3">${sendBtn}</td>
+          </tr>`;
+      }).join('');
+
+      // Pagination
+      const pag = document.getElementById('jobs-pagination');
+      if (!Array.isArray(data) && (data.previous || data.next)) {
+        const total = data.count || items.length;
+        pag.innerHTML = `
+          <span class="text-slate-400">${total} jobs totales</span>
+          <div class="flex gap-2">
+            ${data.previous ? `<button onclick="loadJobs(${page-1})" class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-sm transition">← Anterior</button>` : ''}
+            <span class="px-3 py-1.5 text-sm text-slate-400">Página ${page}</span>
+            ${data.next ? `<button onclick="loadJobs(${page+1})" class="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-sm transition">Siguiente →</button>` : ''}
+          </div>`;
+      } else {
+        pag.innerHTML = `<span class="text-slate-400">${items.length} jobs</span>`;
+      }
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') {
+      document.getElementById('jobs-table-body').innerHTML =
+        `<tr><td colspan="6" class="px-4 py-6 text-center text-red-400">Error al cargar jobs.</td></tr>`;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 5 — SEND EMAIL MODAL
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+function openSendModal(jobId, email) {
+  document.getElementById('modal-job-id').value = jobId;
+  document.getElementById('modal-to-email').value = email;
+  document.getElementById('modal-language').value = 'es';
+  document.getElementById('modal-backdrop').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.add('hidden');
+}
+
+async function confirmSendEmail() {
+  const jobId    = document.getElementById('modal-job-id').value;
+  const toEmail  = document.getElementById('modal-to-email').value.trim();
+  const language = document.getElementById('modal-language').value;
+
+  if (!toEmail) { showToast('Ingresá un email destino', 'warning'); return; }
+
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+
+  try {
+    const res = await apiFetch(`/api/jobs/${jobId}/send-email/`, {
+      method : 'POST',
+      body   : JSON.stringify({ to_email: toEmail, language }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      showToast(`CV enviado a ${toEmail}`, 'success');
+      closeModal();
+    } else {
+      showToast(data.detail || data.to_email?.[0] || 'Error al enviar el email', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirmar envío';
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById('modal-backdrop').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ─────────────────────────────────────────────
+// ════════════════════════════════════════════
+//  TAB 6 — EMAILS
+// ════════════════════════════════════════════
+// ─────────────────────────────────────────────
+async function loadEmails() {
+  tableLoading('emails-table-body', 6);
+
+  try {
+    const res  = await apiFetch('/api/emails/');
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : (data.results || []);
+
+    const tbody = document.getElementById('emails-table-body');
+
+    if (items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">Sin emails enviados todavía.</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map(e => {
+        const statusHtml = e.success
+          ? '<span class="text-green-400 font-medium">✅ Enviado</span>'
+          : `<span class="text-red-400 font-medium" title="${e.error_message || ''}">❌ Error</span>`;
+        const langLabel = e.language === 'en' ? '🇺🇸 English' : '🇦🇷 Español';
+        return `
+          <tr class="tbl-row border-t border-slate-700/50">
+            <td class="px-4 py-3 text-slate-300 text-sm">${e.to_email}</td>
+            <td class="px-4 py-3">
+              ${e.job ? `<span class="text-slate-400 text-xs font-mono">Job #${e.job}</span>` : '—'}
+            </td>
+            <td class="px-4 py-3 text-slate-400 text-xs">${langLabel}</td>
+            <td class="px-4 py-3 text-slate-400 text-xs max-w-xs truncate" title="${e.subject || ''}">${e.subject || '—'}</td>
+            <td class="px-4 py-3 text-slate-400 text-xs">${fmtDate(e.sent_at)}</td>
+            <td class="px-4 py-3">${statusHtml}</td>
+          </tr>`;
+      }).join('');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') {
+      document.getElementById('emails-table-body').innerHTML =
+        `<tr><td colspan="6" class="px-4 py-6 text-center text-red-400">Error al cargar emails.</td></tr>`;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// CLEAR ACTIONS
+// ─────────────────────────────────────────────
+async function clearHistory() {
+  if (!confirm('¿Eliminar TODO el historial de búsquedas?\nEsto también eliminará todos los jobs asociados.')) return;
+  try {
+    const res = await apiFetch('/api/searches/clear/', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Historial limpiado (${data.deleted ?? 0} sesiones eliminadas)`, 'success');
+      loadHistory();
+      loadSessionsFilter();
+    } else {
+      showToast('No se pudo limpiar el historial', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  }
+}
+
+async function clearJobs() {
+  if (!confirm('¿Eliminar TODOS los jobs encontrados?')) return;
+  try {
+    const res = await apiFetch('/api/jobs/clear/', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Jobs limpiados (${data.deleted ?? 0} eliminados)`, 'success');
+      loadJobs();
+    } else {
+      showToast('No se pudo limpiar los jobs', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  }
+}
+
+async function clearEmails() {
+  if (!confirm('¿Eliminar TODOS los registros de emails enviados?')) return;
+  try {
+    const res = await apiFetch('/api/emails/clear/', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Emails limpiados (${data.deleted ?? 0} eliminados)`, 'success');
+      loadEmails();
+    } else {
+      showToast('No se pudo limpiar los emails', 'error');
+    }
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('Error de conexión', 'error');
+  }
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+(function init() {
+  if (getToken()) {
+    updateSessionStatus(true);
+    showTab('keywords');
+  } else {
+    showTab('login');
+  }
+})();
+</script>
+</body>
+</html>
