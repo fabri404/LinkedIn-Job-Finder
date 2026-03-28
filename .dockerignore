@@ -1,0 +1,65 @@
+# Control de versiones
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*.pyo
+.Python
+*.egg-info
+dist
+build
+
+# Entornos virtuales
+.venv
+venv
+env
+
+# Archivos de entorno — NUNCA en la imagen
+.env
+.env.*
+!.env.example
+
+# Base de datos SQLite de desarrollo
+*.sqlite3
+db.sqlite3
+
+# Tests y cobertura
+.pytest_cache
+.coverage
+htmlcov
+coverage.xml
+bandit-report.json
+
+# Linters
+.mypy_cache
+.ruff_cache
+.flake8
+
+# Editores
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# CV (no debe ir en la imagen)
+*.pdf
+cv.pdf
+
+# Logs
+*.log
+logs/
+
+# Estáticos compilados (se regeneran en runtime)
+staticfiles/
+media/

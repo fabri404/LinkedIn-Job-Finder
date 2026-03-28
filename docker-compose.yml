@@ -1,0 +1,132 @@
+# Docker Compose v2 — sin "version:" (campo obsoleto en Compose v2)
+
+services:
+
+  # ─── PostgreSQL database ───────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-linkedin_job_api}
+      POSTGRES_USER:     ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-linkedin_job_api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # ─── Django web application ────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DB_HOST: db
+      DB_PORT: "5432"
+    ports:
+      - "8001:8000"
+    volumes:
+      - static_files:/app/staticfiles
+      # NOTA: en producción NO usar bind mount — descomentar solo para desarrollo
+      # - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --settings=config.settings.production &&
+             python manage.py collectstatic --noinput --settings=config.settings.production &&
+             gunicorn config.wsgi:application
+             --bind 0.0.0.0:8000
+             --workers 2
+             --timeout 120
+             --log-level info
+             --access-logfile -
+             --error-logfile -"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g   # Chrome/Selenium requiere más memoria
+
+  # ─── Servicio de desarrollo con hot-reload ─────────────────────────────────
+  web-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    user: "root"
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DB_HOST: db
+      DB_PORT: "5432"
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+      - static_files:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate --settings=config.settings.development &&
+             python manage.py runserver 0.0.0.0:8000 --settings=config.settings.development"
+    profiles:
+      - dev
+
+  # ─── Test runner (one-off service) ────────────────────────────────────────
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DB_HOST: db
+      DB_PORT: "5432"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "pytest -v
+             --cov=apps
+             --cov-report=xml
+             --cov-report=term-missing"
+    profiles:
+      - test
+    deploy:
+      resources:
+        limits:
+          memory: 2g   # Chrome en tests consume bastante
+
+volumes:
+  postgres_data:
+    driver: local
+  static_files:
+    driver: local
