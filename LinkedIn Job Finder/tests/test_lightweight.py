@@ -77,3 +77,26 @@ def test_dashboard_cached_reloads_only_when_file_changes(tmp_path):
     # Assert
     assert (first, second, third) == ("a", "a", "bb")
     assert len(loads) == 2
+
+
+def test_retry_minutes_backs_off_after_consecutive_failures():
+    assert [main.retry_minutes(n) for n in (1, 2, 3, 4)] == [1, 2, 4, 8]
+    assert main.retry_minutes(20) == main.MAX_RETRY_MINUTES
+
+
+def test_run_fresh_cycle_unexpected_error_is_logged_and_skips_the_source(monkeypatch, tmp_path):
+    # Arrange
+    from types import SimpleNamespace
+
+    store = Store(tmp_path)
+    ctx = SimpleNamespace(settings=SimpleNamespace(chrome_profile_dir=tmp_path), store=store, current_source=4)
+    monkeypatch.setattr(main, "open_feed", lambda _s: object())
+    monkeypatch.setattr(main, "run_cycle", lambda _d, _c: {}["falta"])
+    monkeypatch.setattr(main, "kill_chrome", lambda _d, _p: None)
+
+    # Act
+    completed = main.run_fresh_cycle(ctx, dry_run=True)
+
+    # Assert
+    assert completed is False
+    assert store.progress[main.CURSOR_KEY] == 5

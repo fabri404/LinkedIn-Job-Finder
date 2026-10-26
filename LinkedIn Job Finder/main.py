@@ -141,6 +141,7 @@ class LoopContext:
         self.gmail_checked = False
         self.found_last_cycle = 0
         self.idle_cycles = 0
+        self.failed_cycles = 0
 
 
 def _rotating_handler(path: Path) -> logging.Handler:
@@ -475,6 +476,11 @@ def run_cycle(driver: webdriver.Chrome, ctx: LoopContext) -> None:
 
 # Errores de un Chrome colgado o caído: el comando a chromedriver vence o se corta.
 CHROME_ERRORS = (WebDriverException, urllib3.exceptions.HTTPError, OSError)
+# Errores de programación o de un HTML inesperado en una vuelta: se registran con el traceback y el
+# loop sigue en vez de morir en segundo plano sin que nadie lo note. AuthError y SystemExit (Gmail
+# sin sesión, checkpoint de LinkedIn) sí lo frenan, a propósito.
+UNEXPECTED_ERRORS = (AttributeError, LookupError, TypeError, ValueError, RuntimeError, ArithmeticError)
+MAX_RETRY_MINUTES = 60
 RETRY_AFTER_HANG_MINUTES = 1
 
 
@@ -521,9 +527,13 @@ def run_fresh_cycle(ctx: LoopContext, dry_run: bool) -> bool:
         closed = True
     except CHROME_ERRORS as exc:
         ctx.store.progress[CURSOR_KEY] = ctx.current_source + 1
-        log.error("Chrome dejó de responder (%s) en la fuente %d; lo cierro y retomo desde la siguiente en %d min.",
-                  type(exc).__name__, ctx.current_source, RETRY_AFTER_HANG_MINUTES)
+        log.error("Chrome dejó de responder (%s) en la fuente %d; lo cierro y retomo desde la siguiente.",
+                  type(exc).__name__, ctx.current_source)
+    except UNEXPECTED_ERRORS:
+        ctx.store.progress[CURSOR_KEY] = ctx.current_source + 1
+        log.exception("Error inesperado en la fuente %d; sigo con la siguiente.", ctx.current_source)
     finally:
+        ctx.store.save()
         if not closed:
             kill_chrome(driver, ctx.settings.chrome_profile_dir)
     return closed
@@ -535,12 +545,21 @@ def run_loop(ctx: LoopContext, args: argparse.Namespace) -> None:
         if args.once:
             return
         if not completed:
-            time.sleep(RETRY_AFTER_HANG_MINUTES * 60)
+            ctx.failed_cycles += 1
+            wait = retry_minutes(ctx.failed_cycles)
+            log.info("Reintento en %d min (%d vueltas seguidas con error).", wait, ctx.failed_cycles)
+            time.sleep(wait * 60)
             continue
+        ctx.failed_cycles = 0
         ctx.idle_cycles = 0 if ctx.found_last_cycle else ctx.idle_cycles + 1
         pause = next_pause_minutes(ctx.settings.run, ctx.idle_cycles)
         log.info("Pausa de %.0f min antes del próximo F5 (%d vueltas seguidas sin novedades).", pause, ctx.idle_cycles)
         time.sleep(pause * 60)
+
+
+def retry_minutes(failed_cycles: int) -> int:
+    """1, 2, 4… minutos tras cada vuelta fallida seguida: un error que se repite no relanza Chrome cada minuto."""
+    return min(MAX_RETRY_MINUTES, RETRY_AFTER_HANG_MINUTES * 2 ** min(failed_cycles - 1, 6))
 
 
 def next_pause_minutes(run: RunSettings, idle_cycles: int) -> float:
