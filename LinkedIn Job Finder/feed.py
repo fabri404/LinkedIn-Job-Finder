@@ -78,10 +78,12 @@ for (const c of items) {
   if (c.dataset.jfLen === String(text.length)) { c.dataset.jfDone = '1'; continue; }
   c.dataset.jfLen = String(text.length);
   const urn = c.getAttribute('data-urn') || '';
-  const link = [...c.querySelectorAll('a[href]')].map(a => a.href)
-    .find(u => /\\/feed\\/update\\/|\\/posts\\//.test(u))
+  const hrefs = [...c.querySelectorAll('a[href]')].map(a => a.href);
+  const link = hrefs.find(u => /\\/feed\\/update\\/|\\/posts\\//.test(u))
     || (urn ? `https://www.linkedin.com/feed/update/${urn}/` : '');
-  out.push([text, link.split('?')[0]]);
+  // La búsqueda 2026 no expone el link del post: queda el perfil de quien lo publicó.
+  const author = hrefs.find(u => /\\/in\\/[^/]+|\\/company\\/[^/]+/.test(u)) || '';
+  out.push([text, link.split('?')[0], author.split('?')[0]]);
 }
 return out;
 """
@@ -99,6 +101,7 @@ class FeedPost:
     key: str
     text: str
     url: str
+    author_url: str = ""
 
 
 def post_key(text: str) -> str:
@@ -189,13 +192,13 @@ def wait_for_login(driver: webdriver.Chrome, timeout_s: int = 900) -> bool:
 def _collect(driver: webdriver.Chrome, posts: dict[str, FeedPost], is_seen: Callable[[str], bool]) -> int:
     """Suma a `posts` lo que hay en pantalla; devuelve cuántos posts aparecieron que no se habían visto."""
     fresh = 0
-    for text, url in driver.execute_script(COLLECT_JS) or []:
+    for text, url, author_url in driver.execute_script(COLLECT_JS) or []:
         key = post_key(text)
         current = posts.get(key)
         if current is None and not is_seen(key):
             fresh += 1
         if current is None or len(text) > len(current.text):
-            posts[key] = FeedPost(key, text, url)
+            posts[key] = FeedPost(key, text, url, author_url)
     return fresh
 
 

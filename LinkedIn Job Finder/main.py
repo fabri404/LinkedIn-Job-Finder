@@ -179,7 +179,7 @@ def enqueue_new_posts(posts: list[FeedPost], ctx: LoopContext) -> int:
             _record_post_lead(post, posting, ctx)
             continue
         audit.info("  texto: %s", " ".join(post.text.split())[:800])  # para auditar falsos aptos
-        queued += _enqueue_posting(posting, post.url, ctx)
+        queued += _enqueue_posting(posting, post.url or post.author_url, ctx)
     ctx.store.save()
     return queued
 
@@ -197,9 +197,9 @@ def _record_post_lead(post: FeedPost, posting: JobPosting, ctx: LoopContext) -> 
     ctx.store.mark_seen(lead_key)
     links = " ".join(dict.fromkeys(URL_PATTERN.findall(post.text)))
     first_name = author.split()[0] if author else ""
-    ctx.store.record_lead((date.today().isoformat(), author, "", posting.role_title, post.url, links,
+    ctx.store.record_lead((date.today().isoformat(), author, post.author_url, posting.role_title, post.url, links,
                            linkedin_message(first_name, posting)))
-    log.info("LINKEDIN → %s | %s | %s", author or "?", posting.role_title, post.url)
+    log.info("LINKEDIN → %s | %s | %s", author or "?", posting.role_title, post.author_url or post.url)
 
 
 def _enqueue_posting(posting: JobPosting, post_url: str, ctx: LoopContext) -> int:

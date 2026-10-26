@@ -62,7 +62,7 @@ def test_scroll_until_idle_stops_after_idle_limit_reads_without_new_posts(monkey
     monkeypatch.setattr(feed, "_wheel_scroll", lambda _driver: None)
     monkeypatch.setattr(feed.time, "sleep", lambda _s: None)
     text = "Buscamos desarrollador Python, enviar cv a rrhh@empresa.com " * 3
-    driver = _FakeDriver([[[text, "https://www.linkedin.com/feed/update/1/"]]])
+    driver = _FakeDriver([[[text, "https://www.linkedin.com/feed/update/1/", "https://www.linkedin.com/in/ana/"]]])
     source = Source(SEARCH, minutes=5, idle_limit=SEARCH_IDLE_LIMIT)
 
     # Act
