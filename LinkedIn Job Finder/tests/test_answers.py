@@ -1,4 +1,4 @@
-from answers import GITHUB_URL, LINKEDIN_URL, YES, CITY, HEADLINE, answer_for, pick_option
+from answers import GITHUB_URL, LINKEDIN_URL, YES, answer_with_job_location, CITY, HEADLINE, answer_for, pick_option
 
 
 def test_answer_for_headline_returns_profile_headline():
@@ -100,3 +100,39 @@ def test_answer_for_sueldo_pretendido_is_salary():
 
 def test_answer_for_internet_connection_returns_yes():
     assert answer_for("¿Contás con conexión a internet estable y espacio para trabajar?") == YES
+
+
+def test_answer_for_voluntary_demographic_questions_declines():
+    for label in ("Race/Ethnicity", "Gender", "Disability"):
+        assert pick_option(["Male", "Female", "I don't wish to answer"], answer_for(label)) == 2
+
+
+def test_answer_for_english_communication_returns_yes():
+    assert answer_for("Are you really good at communicating in English?*") == YES
+
+
+def test_answer_for_veteran_question_answers_not_a_veteran():
+    options = ["I identify as one or more protected veteran classifications", "I am not a protected veteran",
+               "I don't wish to answer"]
+    assert pick_option(options, answer_for("Are you a veteran?")) == 1
+    assert pick_option(["Yes", "No"], answer_for("Are you a veteran?")) == 1
+
+
+def test_answer_with_job_location_authorization_only_for_argentina():
+    label = "Are you authorized to work in the job's location?*"
+    assert answer_with_job_location(label, job_in_argentina=True) == YES
+    assert answer_with_job_location(label, job_in_argentina=False) is None
+
+
+def test_answer_for_timing_to_start_returns_immediate():
+    assert answer_for("If hired, what is your timing to start a new position?*")[0] == "Inmediata"
+
+
+def test_answer_for_highest_education_completed_is_high_school():
+    options = ["Select an option", "High School", "Associate's Degree", "Bachelor's Degree"]
+    assert pick_option(options, answer_for("What is your highest level of education completed?")) == 1
+
+
+def test_answer_for_relocation_is_not_open():
+    options = ["Yes, I am open to relocation", "Not open to relocation"]
+    assert pick_option(options, answer_for("Are you open to relocation?*")) == 1

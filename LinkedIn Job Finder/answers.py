@@ -23,6 +23,9 @@ COVER_LETTER = (
 )
 YES = ("sí", "si", "yes")
 NO = ("no",)
+# Preguntas demográficas voluntarias (EEO): siempre "prefiero no decir", la opción que existe para eso.
+DECLINE = ("decline to self-identify", "i don't wish to answer", "i do not want to answer", "prefer not to say",
+           "prefiero no decir", "prefiero no responder", "no deseo responder", "decline", "prefer not")
 # Años con la tecnología: el stack de SE-AR Manager y los cursos (1 año); lo demás no se responde.
 CORE_STACK = re.compile(
     r"python|fastapi|sql|postgres|git\b|docker|api|rest|backend|back-end|testing|qa|pytest|linux|flutter|"
@@ -48,18 +51,30 @@ RULES: tuple[Rule, ...] = (
     _rule(r"portfolio|portafolio|website|sitio web|p[aá]gina web|personal site", GITHUB_URL),
     _rule(r"(live|living|based|located|resid|viv[ií]s|vives|vive).*argentin|argentin.*(resid|based)", YES),
     _rule(r"cover letter|carta de presentaci", COVER_LETTER),
-    _rule(r"location \(city\)|ciudad|city", CITY),
+    _rule(r"location \(city\)|\bciudad\b|\bcity\b", CITY),
     _rule(r"(authori[sz]ed|autorizad|derecho).*(work|trabajar).*argentin|legally.*argentin", YES),
     _rule(r"sponsor|patrocin|visa", NO),
     _rule(r"remot|home office", YES),
     _rule(r"(h[ií]brid|presencial|on-?site|oficina).*c[oó]rdoba|c[oó]rdoba.*(h[ií]brid|presencial|oficina)", YES),
+    # Máximo nivel educativo *completado*: secundario (la Tecnicatura en la UTN está en curso hasta 2027).
+    _rule(r"(highest|m[aá]ximo|mayor) (level of )?(education|nivel (de estudios|educativo))",
+          ("high school", "secundari", "secondary", "bachiller")),
+    # Preferencia: fuera de Córdoba solo remoto, así que no se muda.
+    _rule(r"relocat|reubic|mudarte|mudanza|trasladarte", ("not open", "no estoy", "no")),
+    # No es veterano (de EE.UU. ni de otro país): es un dato cierto, no hace falta declinar.
+    _rule(r"\bveteran", ("i am not a protected veteran", "not a protected veteran", "no", *DECLINE)),
+    _rule(r"\b(race|ethnicity|etnia|raza|gender|g[eé]nero|sexo|disabilit\w*|discapacidad|"
+          r"sexual orientation|orientaci[oó]n sexual|pronouns|pronombres)\b", DECLINE),
+    _rule(r"(communicat|comunicar|fluent|fluid).*(english|ingl[eé]s)|(english|ingl[eé]s).*(communicat|comunicar|fluent)",
+          YES),
     _rule(r"(english|ingl[eé]s).*(level|nivel|proficien|dominio)|(level|nivel).*(english|ingl[eé]s)",
           ("c1", "advanced", "avanzado", "profesional", "professional", "fluent", *YES)),
     # Pretensión ya usada en sus postulaciones (USD 900/mes); en pesos no se responde.
     _rule(r"^(?!.*(\bars\b|pesos|reviewed|aligned|revisaste|de acuerdo)).*"
           r"(salary|salario|pretensi|pretendid|sueldo|expected .*income|remuneraci|compensation)", "900"),
-    _rule(r"start date|fecha de inicio|cu[aá]ndo (pod|pued)|notice period|preaviso|"
-          r"disponibilidad (para (empezar|comenzar|incorporarte)|de inicio)", "Inmediata"),
+    _rule(r"start date|fecha de inicio|cu[aá]ndo (pod|pued)|notice period|preaviso|timing to start|"
+          r"when (can|could) you start|start a new position|incorporaci[oó]n|"
+          r"disponibilidad (para (empezar|comenzar|incorporarte)|de inicio)", ("Inmediata", "inmediat", "immediate", "asap", "lo antes posible")),
 )
 YEARS_QUESTION = re.compile(r"\b(years?|años?)\b.*(experien)|(experien).*\b(years?|años?)\b", re.IGNORECASE)
 EXPERIENCE_QUESTION = re.compile(r"experien|hands-on|have you (used|worked)|ten[eé]s conocimiento|conocimientos? (de|en)",
@@ -80,6 +95,19 @@ WILLINGNESS = re.compile(
 
 
 MIN_YEARS = re.compile(r"(\d+)\s*\+?\s*(años?|years?|yrs?)\b", re.IGNORECASE)
+
+
+# "¿Estás autorizado a trabajar en la ubicación del empleo?": sí solo si el aviso es en Argentina.
+JOB_LOCATION_AUTHORIZATION = re.compile(
+    r"authori[sz]ed to work in the job'?s location|autorizad[oa] (para|a) trabajar en (la|esta) ubicaci[oó]n",
+    re.IGNORECASE)
+
+
+def answer_with_job_location(label: str, job_in_argentina: bool) -> str | tuple[str, ...] | None:
+    """answer_for, más las preguntas que dependen de dónde es el aviso."""
+    if JOB_LOCATION_AUTHORIZATION.search(label):
+        return YES if job_in_argentina else None
+    return answer_for(label)
 
 
 def answer_for(label: str) -> str | tuple[str, ...] | None:
