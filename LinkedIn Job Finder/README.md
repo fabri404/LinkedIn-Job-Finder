@@ -134,7 +134,8 @@ programador
 ### Cómo se arma cada vuelta
 
 1. **Empleos** (HTTP, sin Chrome): búsquedas de `job_queries.txt` en la sección Empleos, solo avisos con
-   Solicitud sencilla de las últimas 24 h. Si el formulario queda completo con datos verificados
+   Solicitud sencilla de las últimas 24 h: Argentina remoto, Córdoba con cualquier modalidad y, rotando,
+   remoto en Chile, Paraguay, Colombia, España o México. Si el formulario queda completo con datos verificados
    (`answers.py`), **la solicitud se envía**; si falta algo, se guarda en LinkedIn → Mis empleos → En curso.
 2. **Búsquedas de publicaciones** de `channels.txt` ("enviar cv" + un término), todas, primero.
 3. **Grupos y páginas de empresa**: 8 por vuelta, rotando.
@@ -143,6 +144,10 @@ programador
 Cada fuente se deja de scrollear cuando unas pocas lecturas seguidas no traen posts nuevos, y la
 fuente por la que va la vuelta queda guardada: un reinicio retoma desde ahí. Si una vuelta no
 encuentra nada, la pausa siguiente se duplica (tope 60 min).
+
+**Ubicación**: en Córdoba vale presencial, híbrido o remoto; fuera de Córdoba (otra provincia u otro
+país) solo remoto. Si el aviso no aclara la modalidad, se postula igual por las dudas. Presencial o
+híbrido en Córdoba y remoto en los países preferidos suben en la cola.
 
 Las ofertas aptas con email van a la cola de borradores ordenadas por relevancia (Python/QA/junior
 primero, Java/.NET/PHP al final). Las aptas **sin email** quedan en la pestaña "Vacantes para

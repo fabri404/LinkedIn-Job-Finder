@@ -53,6 +53,7 @@ from jobs import (
     polite_pause,
     queries_for_cycle,
     search_cards,
+    searches_for_cycle,
 )
 from mailer import AuthError, GmailDraftWriter, MailError, wait_for_gmail_login
 from recruiters import QUERIES_PER_CYCLE as RECRUITER_QUERIES_PER_CYCLE
@@ -272,13 +273,13 @@ def pause_jobs_if_rate_limited(exc: Exception, ctx: LoopContext, what: str) -> N
 def new_job_cards(ctx: LoopContext) -> list[JobCard]:
     """Avisos de la sección Empleos que todavía no se evaluaron, sin repetir entre búsquedas."""
     cards: dict[str, JobCard] = {}
-    queries = queries_for_cycle(ctx.job_queries, ctx.job_cycle)
+    searches = searches_for_cycle(ctx.job_queries, ctx.job_cycle)
     ctx.job_cycle += 1
-    for query in queries:
+    for query, scope in searches:
         try:
-            found = search_cards(query)
+            found = search_cards(query, scope)
         except JOB_FETCH_ERRORS as exc:
-            pause_jobs_if_rate_limited(exc, ctx, f"la búsqueda '{query}'")
+            pause_jobs_if_rate_limited(exc, ctx, f"la búsqueda '{query}' ({scope.label})")
             break
         cards.update((c.job_id, c) for c in found if not ctx.store.is_seen(c.key))
         polite_pause()

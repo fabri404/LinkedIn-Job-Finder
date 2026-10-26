@@ -40,10 +40,10 @@ def test_evaluate_post_remote_python_with_email_is_accepted():
     assert posting.track == "backend"
 
 
-def test_evaluate_post_remote_only_mexico_is_rejected():
+def test_evaluate_post_remote_mexico_is_accepted():
+    # Preferencia: fuera de Córdoba vale el 100% remoto, también en México.
     verdict, _ = evaluate_post(BEYSERIN, KEYWORDS)
-    assert not verdict.accepted
-    assert "ubicación" in verdict.reason
+    assert verdict.accepted, verdict.reason
 
 
 def test_evaluate_post_onsite_paraguay_is_rejected():
@@ -229,11 +229,18 @@ def test_extract_role_title_uses_dev_line_when_buscamos_is_generic():
     assert extract_role_title(text) == "Desarrollador React Native Semi Senior"
 
 
-def test_evaluate_post_mexican_recruiter_email_without_argentina_is_rejected():
+def test_evaluate_post_mexican_recruiter_email_with_remote_job_is_accepted():
     text = ("Buscamos desarrollador/a web para un proyecto de CRM. Requisitos: 2 años con APIs y bases de "
             "datos. Remoto. Enviá tu CV a contacto@ideaccion.com.mx")
 
-    assert evaluate_post(text, KEYWORDS)[0].reason == "email de otro país (contacto@ideaccion.com.mx)"
+    assert evaluate_post(text, KEYWORDS)[0].accepted
+
+
+def test_evaluate_post_mexican_recruiter_email_with_unknown_modality_is_accepted_just_in_case():
+    text = ("Buscamos desarrollador/a web para un proyecto de CRM. Requisitos: 2 años con APIs y bases de "
+            "datos. Enviá tu CV a contacto@ideaccion.com.mx")
+
+    assert evaluate_post(text, KEYWORDS)[0].accepted
 
 
 def test_evaluate_post_business_developer_is_rejected():
@@ -281,12 +288,6 @@ def test_score_job_posting_en_la_busqueda_de_is_a_hiring_signal():
     assert score_job_posting(post).is_job
 
 
-def test_check_location_foreign_flag_without_argentina_is_rejected():
-    post = "¡BUSCAMOS DESARROLLADOR FULL STACK! 💻🇬🇹 Envía tu CV por WhatsApp: 3266-0665"
-
-    assert not check_location(post).accepted
-
-
 def test_check_location_english_level_flag_is_ignored():
     post = "Buscamos Desarrollador Python. Inglés intermedio 🇺🇸. Remoto."
 
@@ -319,16 +320,17 @@ def test_evaluate_post_indonesian_tester_post_is_rejected():
     assert not verdict.accepted
 
 
-def test_evaluate_post_indian_qa_post_with_city_is_rejected():
+def test_evaluate_post_foreign_post_without_modality_is_accepted_just_in_case():
+    # Preferencia: si no aclara modalidad, se postula igual (queda como borrador para revisar).
     text = ("Komal • HR Executive 1 día Seguir Zorko is Hiring - QA Tester! Experience: 1+ Year. "
             "Location: Vesu, Surat. Full-Time. Send your CV to: hr@zorko.com")
 
-    assert evaluate_post(text, KEYWORDS)[0].reason == "ubicación fuera de Argentina (surat)"
+    assert evaluate_post(text, KEYWORDS)[0].accepted
 
 
-def test_evaluate_post_chilean_full_stack_post_is_rejected():
+def test_evaluate_post_chilean_onsite_full_stack_post_is_rejected():
     text = ("Juan • Analista de Personas 1 h Seguir Nos encontramos en búsqueda de Desarrollador/a Full Stack "
-            "(Odoo, Integraciones y BI). (Las Condes). Requisitos: 2 años. Enviar CV a rrhh@democorp.com")
+            "(Odoo, Integraciones y BI). Presencial en Las Condes. Requisitos: 2 años. Enviar CV a rrhh@democorp.com")
 
     assert not evaluate_post(text, KEYWORDS)[0].accepted
 

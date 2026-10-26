@@ -1,7 +1,9 @@
 """jobs.py - Lee la sección Empleos de LinkedIn por sus endpoints públicos (sin sesión).
 
 No usa el Chrome del loop: son pedidos HTTP a /jobs-guest/, el mismo HTML que ve
-alguien sin cuenta. Solo avisos de Argentina publicados en las últimas 24 horas.
+alguien sin cuenta. Avisos de las últimas 24 horas según la preferencia de Adriel:
+Córdoba con cualquier modalidad, el resto de Argentina y Chile, Paraguay, Colombia, España
+y México solo remotos.
 """
 
 from __future__ import annotations
@@ -27,8 +29,10 @@ PAGES_PER_QUERY = 2
 PAGE_SIZE = 10
 # LinkedIn sin sesión responde 429 tras unos pocos pedidos seguidos: pocas búsquedas por
 # vuelta (rotando), pocas descripciones, y si igual corta, una hora sin pedirle nada.
-# Las vueltas ahora duran minutos y no horas: 3 búsquedas por vuelta ya recorren todas varias veces al día.
+# Las vueltas ahora duran minutos y no horas: pocas búsquedas por vuelta ya recorren todas varias veces al día.
 QUERIES_PER_CYCLE = 3
+LOCAL_QUERIES_PER_CYCLE = 2
+REMOTE_WORKPLACE = "2"  # f_WT de LinkedIn: 1 presencial, 2 remoto, 3 híbrido
 MAX_DETAILS_PER_CYCLE = 10
 COOLDOWN_AFTER_429_S = 60 * 60
 TIMEOUT_S = 20
@@ -42,6 +46,31 @@ TITLE_PATTERN = re.compile(r"base-search-card__title[^>]*>(.*?)</h3>", re.S)
 COMPANY_PATTERN = re.compile(r"base-search-card__subtitle[^>]*>(.*?)</h4>", re.S)
 LOCATION_PATTERN = re.compile(r"job-search-card__location[^>]*>(.*?)</span>", re.S)
 DESCRIPTION_PATTERN = re.compile(r"show-more-less-html__markup[^>]*>(.*?)</div>", re.S)
+
+
+@dataclass(frozen=True)
+class SearchScope:
+    """Dónde buscar: por geoId para países (el nombre "México" trae avisos de EE.UU.) o por nombre
+    para Córdoba (verificado: el nombre devuelve solo avisos de Córdoba)."""
+
+    label: str
+    remote_only: bool
+    geo_id: str = ""
+    location: str = ""
+
+
+# Fuera de Córdoba solo sirve el remoto; en Córdoba, cualquier modalidad.
+LOCAL_SCOPES = (
+    SearchScope("Argentina remoto", remote_only=True, geo_id=ARGENTINA_GEO_ID),
+    SearchScope("Córdoba", remote_only=False, location="Córdoba, Argentina"),
+)
+FOREIGN_SCOPES = (
+    SearchScope("Chile remoto", remote_only=True, geo_id="104621616"),
+    SearchScope("Paraguay remoto", remote_only=True, geo_id="104065273"),
+    SearchScope("Colombia remoto", remote_only=True, geo_id="100876405"),
+    SearchScope("España remoto", remote_only=True, geo_id="105646813"),
+    SearchScope("México remoto", remote_only=True, geo_id="103323778"),
+)
 
 
 @dataclass(frozen=True)
@@ -110,15 +139,38 @@ def queries_for_cycle(queries: list[str], cycle: int, per_cycle: int = QUERIES_P
     return (queries[start:] + queries[:start])[:per_cycle]
 
 
-def search_cards(query: str) -> list[JobCard]:
-    """Avisos de las últimas 24 h en Argentina para `query`, hasta PAGES_PER_QUERY páginas."""
+def searches_for_cycle(queries: list[str], cycle: int) -> list[tuple[str, SearchScope]]:
+    """LOCAL_QUERIES_PER_CYCLE búsquedas en Argentina (remoto) y en Córdoba, más una remota en uno de
+    los países preferidos; búsquedas y países rotan entre vueltas."""
+    local = [(query, scope) for query in queries_for_cycle(queries, cycle, LOCAL_QUERIES_PER_CYCLE)
+             for scope in LOCAL_SCOPES]
+    if not queries:
+        return local
+    return local + [(queries[cycle % len(queries)], FOREIGN_SCOPES[cycle % len(FOREIGN_SCOPES)])]
+
+
+def search_params(query: str, scope: SearchScope, page: int) -> dict[str, str | int]:
+    # f_AL: solo Solicitud sencilla (lo que se puede postular solo); sortBy=DD: lo más nuevo primero.
+    params: dict[str, str | int] = {"keywords": query, "f_TPR": LAST_24_HOURS, "f_AL": "true",
+                                    "sortBy": "DD", "start": page * PAGE_SIZE}
+    if scope.geo_id:
+        params["geoId"] = scope.geo_id
+    if scope.location:
+        params["location"] = scope.location
+    if scope.remote_only:
+        params["f_WT"] = REMOTE_WORKPLACE
+    return params
+
+
+def search_cards(query: str, scope: SearchScope = LOCAL_SCOPES[0]) -> list[JobCard]:
+    """Avisos de las últimas 24 h para `query` en `scope`, hasta PAGES_PER_QUERY páginas. Los de una
+    búsqueda remota llevan "Remoto" en la ubicación para que el filtro de modalidad lo sepa."""
     cards: list[JobCard] = []
     for page in range(PAGES_PER_QUERY):
-        # f_AL: solo Solicitud sencilla (lo que se puede postular solo); sortBy=DD: lo más nuevo primero.
-        params = {"keywords": query, "location": "Argentina", "geoId": ARGENTINA_GEO_ID,
-                  "f_TPR": LAST_24_HOURS, "f_AL": "true", "sortBy": "DD", "start": page * PAGE_SIZE}
-        found = parse_cards(_get(f"{SEARCH_URL}?{urlencode(params)}"))
-        log.info("Empleos '%s' página %d: %d avisos.", query, page + 1, len(found))
+        found = parse_cards(_get(f"{SEARCH_URL}?{urlencode(search_params(query, scope, page))}"))
+        if scope.remote_only:
+            found = [JobCard(c.job_id, c.title, c.company, f"{c.location} · Remoto") for c in found]
+        log.info("Empleos '%s' (%s) página %d: %d avisos.", query, scope.label, page + 1, len(found))
         cards += found
         if len(found) < PAGE_SIZE:
             break

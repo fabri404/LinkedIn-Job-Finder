@@ -100,7 +100,9 @@ NON_DEV_ROLE_PATTERN = re.compile(
     r"almac[eé]n|operari[oa]|repositor|cajer[oa]|mantenimiento|producci[oó]n|compras|"
     r"tesorer[oa]|cobranzas|liquidaci[oó]n de sueldos|t[eé]cnic[oa] electr|mec[aá]nic|"
     r"\brisk\b|riesgo|fraude|\bfraud\b|prevenci[oó]n|docente|profesor|instructor|tutor|capacitador|"
-    r"suscriptor|underwriter|seguros|t[eé]cnico de ingenier",
+    r"suscriptor|underwriter|seguros|t[eé]cnico de ingenier|miner[oa]|miner[ií]a|soldador|electricista|"
+    r"operador de (planta|m[aá]quina|equipo)|chofer|conductor|microbiolog|bioqu[ií]mic|qu[ií]mic[oa]|"
+    r"laboratorio|farmac|alimentos|calidad y acreditaci|estructuras|dise[ñn]o de estructuras",
     re.IGNORECASE,
 )
 
@@ -192,8 +194,22 @@ FOREIGN_PLACE_PATTERN = re.compile(r"\b(" + "|".join(map(re.escape, FOREIGN_PLAC
 US_PATTERN = re.compile(r"\bUSA\b|\bEE\.? ?UU\.?")
 US_PLACES = frozenset({"united states", "estados unidos", "usa"})
 ARGENTINA_OR_REMOTE = ("argentina", "latam", "latinoamérica", "córdoba", "cordoba")
-REMOTE_TERMS = ("remoto", "remote", "home office", "100% remoto")
+REMOTE_TERMS = ("remoto", "remota", "remote", "home office", "100% remoto")
 ONSITE_TERMS = ("presencial", "híbrid", "hibrid", "on-site", "onsite")
+# Preferencia de Adriel: en Córdoba vale presencial, híbrido o remoto; en cualquier otro lugar
+# (CABA, otras provincias u otros países) solo remoto. Si el aviso no aclara la modalidad, se
+# postula igual por las dudas.
+FULL_REMOTE_PATTERN = re.compile(
+    r"100\s?% ?remot|full[- ]?remot|fully remote|totalmente remot|remote[- ]first|remoto total")
+HYBRID_PATTERN = re.compile(r"h[ií]brid|hybrid")
+ONSITE_PATTERN = re.compile(r"presencial|on-?site|in-office|en (la )?oficina|\bwfo\b|work from office")
+NOT_ONSITE_PATTERN = re.compile(r"(no|sin) (es )?presencial(idad)?|no requiere presencialidad")
+# "Remoto para residentes de México": el remoto no sirve si exige vivir en otro país.
+RESIDENCY_PATTERN = re.compile(
+    r"\b(residentes?|residir|residan|radicad[oa]s?|domiciliad[oa]s?|must (live|reside)|based in|located in|"
+    r"living in|resident)\b")
+RESIDENCY_WINDOW = 60
+PREFERRED_COUNTRIES = ("chile", "paraguay", "colombia", "españa", "méxico", "mexico", "spain")
 CORDOBA_TERMS = ("córdoba", "cordoba")
 ARGENTINA_TERMS = ("argentina", "córdoba", "cordoba", "buenos aires", "caba", "rosario", "#arg")
 # Bandera emoji (par de "regional indicators"). 🇺🇸/🇬🇧/🇪🇺 suelen marcar el nivel de inglés, no el país.
@@ -390,36 +406,53 @@ def _mentions_senior_role(text_lower: str) -> bool:
                for m in SENIOR_PATTERN.finditer(text_lower))
 
 
-def check_location(text: str) -> Verdict:
-    text_lower = text.lower()
-    foreign_match = FOREIGN_PLACE_PATTERN.search(text_lower)
-    foreign = foreign_match.group(1) if foreign_match else ("usa" if US_PATTERN.search(text) else None)
-    local = any(p in text_lower for p in ARGENTINA_OR_REMOTE)
+def work_modality(text_lower: str) -> str:
+    """"remote", "hybrid", "onsite" o "unknown" según lo que dice el aviso."""
+    if FULL_REMOTE_PATTERN.search(text_lower):
+        return "remote"
+    if HYBRID_PATTERN.search(text_lower):
+        return "hybrid"
     remote = any(p in text_lower for p in REMOTE_TERMS)
-    onsite = any(p in text_lower for p in ONSITE_TERMS)
-    in_cordoba = any(p in text_lower for p in CORDOBA_TERMS)
-    flag = _foreign_flag_without_argentina(text, text_lower)
-    if flag:
-        return Verdict(False, f"bandera de otro país ({flag})")
-    others = _foreign_places_without_argentina(text_lower)
-    if others:
-        return Verdict(False, f"solo para otros países ({', '.join(others)})")
-    if foreign and not local and not _remote_from_abroad(foreign, text_lower):
-        return Verdict(False, f"ubicación fuera de Argentina ({foreign})")
-    if onsite and not remote and not in_cordoba and _mentions_other_city(text_lower):
-        return Verdict(False, "presencial fuera de Córdoba")
-    return Verdict(True, "ubicación ok")
+    onsite = bool(ONSITE_PATTERN.search(NOT_ONSITE_PATTERN.sub("", text_lower)))
+    if remote and onsite:
+        return "hybrid"  # "remoto con presencialidad en oficina"
+    if onsite:
+        return "onsite"
+    return "remote" if remote else "unknown"
 
 
-def _remote_from_abroad(foreign: str, text_lower: str) -> bool:
-    """Remoto para LATAM, o remoto para un cliente de EE.UU. en un post en castellano: se contrata
-    desde Argentina (pago en USD)."""
-    if not any(p in text_lower for p in REMOTE_TERMS):
-        return False
-    if "latam" in text_lower:
-        return True
-    onsite = any(p in text_lower for p in ONSITE_TERMS)
-    return foreign in US_PLACES and not onsite and detect_language(text_lower) == "es"
+MODALITY_LABELS = {"hybrid": "híbrido", "onsite": "presencial", "remote": "remoto", "unknown": "sin modalidad"}
+
+
+def check_location(text: str) -> Verdict:
+    """Córdoba: cualquier modalidad. Fuera de Córdoba (otra provincia u otro país): remoto, o sin
+    modalidad aclarada (se postula por las dudas). Se descarta híbrido/presencial fuera de Córdoba."""
+    text_lower = text.lower()
+    modality = work_modality(text_lower)
+    if modality == "remote":
+        if _requires_foreign_residence(text_lower):
+            return Verdict(False, "remoto solo para residentes de otro país")
+        return Verdict(True, "remoto")
+    if any(p in text_lower for p in CORDOBA_TERMS):
+        return Verdict(True, f"{MODALITY_LABELS[modality]} en Córdoba")
+    if modality != "unknown":
+        return Verdict(False, f"{MODALITY_LABELS[modality]} fuera de Córdoba")
+    return Verdict(True, "sin modalidad aclarada: se postula por las dudas")
+
+
+def _requires_foreign_residence(text_lower: str) -> bool:
+    """"Residentes en México/Chile" sin Argentina en la misma frase: ese remoto no es para él."""
+    for match in RESIDENCY_PATTERN.finditer(text_lower):
+        window = text_lower[match.start():match.end() + RESIDENCY_WINDOW]
+        if FOREIGN_PLACE_PATTERN.search(window) and not any(p in window for p in ARGENTINA_OR_REMOTE):
+            return True
+    return False
+
+
+def is_preferred_remote_country(text_lower: str) -> bool:
+    """Remoto en Chile, Paraguay, Colombia, España o México: países que Adriel prioriza."""
+    return work_modality(text_lower) == "remote" and any(
+        re.search(rf"\b{re.escape(c)}\b", text_lower) for c in PREFERRED_COUNTRIES)
 
 
 def _foreign_places_without_argentina(text_lower: str) -> list[str]:
@@ -549,16 +582,7 @@ def evaluate_post(text: str, keywords: list[str]) -> tuple[Verdict, JobPosting |
     if not emails:
         # Vacante acorde sin email: se devuelve igual para dejarla en la lista de contacto por LinkedIn.
         return Verdict(False, "sin email"), _build_posting(text, ())
-    if _foreign_recruiter(emails, text):
-        return Verdict(False, f"email de otro país ({emails[0]})"), None
     return verdict, _build_posting(text, emails)
-
-
-def _foreign_recruiter(emails: tuple[str, ...], text: str) -> bool:
-    text_lower = text.lower()
-    if any(term in text_lower for term in ARGENTINA_TERMS):
-        return False
-    return all(email.endswith(FOREIGN_EMAIL_TLDS) for email in emails)
 
 
 # Títulos junior de IT que no dicen "desarrollador": "Trainee IT", "Pasante de Sistemas", "Soporte IT".
