@@ -146,8 +146,7 @@ class EasyApplyFiller:
         if isinstance(start, ApplyResult):
             return start
         self.driver.execute_script("arguments[0].click()", start)
-        time.sleep(4)
-        if self._root() is None:
+        if self._wait_for_root() is None:
             return ApplyResult("formulario no encontrado")
         result = self._walk_pages()
         if result.status == READY and self.may_submit():
@@ -170,6 +169,13 @@ class EasyApplyFiller:
 
     def _root(self) -> WebElement | None:
         return self.driver.execute_script(ROOT_JS)
+
+    def _wait_for_root(self) -> WebElement | None:
+        """El formulario tarda en abrir entre 2 y 8 s según el aviso."""
+        deadline = time.time() + START_WAIT_S
+        while (root := self._root()) is None and time.time() < deadline:
+            time.sleep(1)
+        return root
 
     def _walk_pages(self) -> ApplyResult:
         for _ in range(MAX_PAGES):
