@@ -27,7 +27,7 @@ def _filler(monkeypatch, walk: ApplyResult, may_submit: bool) -> tuple[EasyApply
     monkeypatch.setattr(easy_apply.time, "sleep", lambda _s: None)
     monkeypatch.setattr(filler, "_start_button", lambda: object())
     monkeypatch.setattr(filler, "driver", type("D", (), {"execute_script": lambda *_a: None})())
-    monkeypatch.setattr(filler, "_wait_for_root", lambda: object())
+    monkeypatch.setattr(filler, "_open_form", lambda: object())
     monkeypatch.setattr(filler, "_walk_pages", lambda: walk)
     monkeypatch.setattr(filler, "_submit", lambda: calls.append("submit") or ApplyResult(SUBMITTED))
     monkeypatch.setattr(filler, "_close_and_save", lambda: calls.append("save") or True)

@@ -49,6 +49,8 @@ CV_LABEL = re.compile(r"curr[ií]cul|resume|\bcv\b", re.IGNORECASE)
 READY = "guardada lista para enviar"
 SUBMITTED = EASY_APPLY_SENT
 START_WAIT_S = 12
+FORM_WAIT_S = 8
+OPEN_ATTEMPTS = 2
 
 ROOT_JS = r"""
 const h = [...document.querySelectorAll('h1,h2,h3')].find(t => /^(Aplicar a|Apply to|Solicitar en)/i.test((t.innerText||'').trim()));
@@ -145,8 +147,7 @@ class EasyApplyFiller:
         start = self._start_button()
         if isinstance(start, ApplyResult):
             return start
-        self.driver.execute_script("arguments[0].click()", start)
-        if self._wait_for_root() is None:
+        if self._open_form() is None:
             return ApplyResult("formulario no encontrado")
         result = self._walk_pages()
         if result.status == READY and self.may_submit():
@@ -170,9 +171,23 @@ class EasyApplyFiller:
     def _root(self) -> WebElement | None:
         return self.driver.execute_script(ROOT_JS)
 
+    def _open_form(self) -> WebElement | None:
+        """El botón aparece antes de que la página termine de cargar: un clic temprano no abre nada y
+        al hidratarse LinkedIn lo reemplaza. Se espera un poco, se lo vuelve a buscar y se hace clic;
+        si el formulario no aparece, se reintenta una vez."""
+        for _ in range(OPEN_ATTEMPTS):
+            time.sleep(2)
+            button = self.driver.execute_script(START_JS, EASY_APPLY_TEXT.pattern)
+            if button is None:
+                return None
+            self.driver.execute_script("arguments[0].click()", button)
+            if (root := self._wait_for_root()) is not None:
+                return root
+        return None
+
     def _wait_for_root(self) -> WebElement | None:
         """El formulario tarda en abrir entre 2 y 8 s según el aviso."""
-        deadline = time.time() + START_WAIT_S
+        deadline = time.time() + FORM_WAIT_S
         while (root := self._root()) is None and time.time() < deadline:
             time.sleep(1)
         return root
