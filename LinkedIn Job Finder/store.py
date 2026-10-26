@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import unicodedata
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from composer import Application
@@ -21,24 +23,36 @@ JOBS_CSV_HEADER = ("fecha", "puesto", "empresa", "ubicacion", "url", "solicitud_
 # Vacantes de recruiters sin email: Adriel les escribe por LinkedIn o completa el link que dejaron.
 LEADS_CSV = "contactar_linkedin.csv"
 LEADS_CSV_HEADER = ("fecha", "recruiter", "perfil", "puesto", "post", "links", "mensaje")
+# A un mismo email se le puede mandar otra vacante (otro puesto) pasados estos días.
+RECONTACT_AFTER = timedelta(days=14)
+LEVEL_WORDS = re.compile(r"\b(junior|jr|semi ?senior|ssr|senior|sr|trainee|a|o|de|del|la|el)\b")
+
+
+def normalize_role(role: str) -> str:
+    """"Desarrollador/a Python Jr." y "desarrollador python" son el mismo puesto."""
+    text = unicodedata.normalize("NFKD", role.lower()).encode("ascii", "ignore").decode()
+    text = LEVEL_WORDS.sub(" ", re.sub(r"[^a-z0-9#+ ]", " ", text))
+    return " ".join(text.split())
 
 
 @dataclass(frozen=True)
 class QueuedApplication:
     app: Application
     post_url: str
+    score: int = 0  # relevance.relevance_score: la cola sale de mayor a menor
 
-    def to_dict(self) -> dict[str, str]:
-        data = asdict(self.app)
+    def to_dict(self) -> dict[str, str | int]:
+        data: dict[str, str | int] = asdict(self.app)
         data["cv_path"] = str(self.app.cv_path)
         data["post_url"] = self.post_url
+        data["score"] = self.score
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, str]) -> QueuedApplication:
+    def from_dict(cls, data: dict) -> QueuedApplication:
         app = Application(data["to"], data["subject"], data["body"],
                           Path(data["cv_path"]), data["role"])
-        return cls(app, data["post_url"])
+        return cls(app, data["post_url"], int(data.get("score", 0)))
 
 
 @dataclass
@@ -87,9 +101,32 @@ class Store:
         for email in emails:
             self.contacted.setdefault(email.lower(), PREVIOUS_CONTACT)
 
-    def is_known_recipient(self, email: str) -> bool:
+    def is_known_recipient(self, email: str, role: str = "") -> bool:
+        """True si ya está en la cola, si se le escribió hace menos de RECONTACT_AFTER, si ya se le
+        mandó este mismo puesto o si fue un contacto previo/descartado (sin fecha)."""
         email = email.lower()
-        return email in self.contacted or any(item.app.to == email for item in self.pending)
+        if any(item.app.to == email for item in self.pending):
+            return True
+        if email not in self.contacted:
+            return False
+        try:
+            last = date.fromisoformat(self.contacted[email])
+        except ValueError:
+            return True
+        if date.today() - last < RECONTACT_AFTER:
+            return True
+        return not role or normalize_role(role) in self._sent_roles().get(email, set())
+
+    def _sent_roles(self) -> dict[str, set[str]]:
+        """Puestos ya enviados por email, según enviados.csv."""
+        path = self.state_dir / SENT_CSV
+        roles: dict[str, set[str]] = {}
+        if not path.exists():
+            return roles
+        with path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                roles.setdefault(row["email"].lower(), set()).add(normalize_role(row["puesto"]))
+        return roles
 
     def is_vetoed(self, email: str) -> bool:
         path = self.state_dir / VETO_FILE
@@ -109,7 +146,9 @@ class Store:
         self._append_csv(LEADS_CSV, LEADS_CSV_HEADER, row)
 
     def enqueue(self, item: QueuedApplication) -> None:
-        self.pending.append(item)
+        """Inserta detrás de los de igual o mayor puntaje: la cola sale por relevancia."""
+        index = next((i for i, queued in enumerate(self.pending) if queued.score < item.score), len(self.pending))
+        self.pending.insert(index, item)
 
     def sent_on(self, day: date) -> int:
         return sum(1 for sent in self.contacted.values() if sent == day.isoformat())
@@ -129,8 +168,16 @@ class Store:
         self._append_csv(JOBS_CSV, JOBS_CSV_HEADER, row)
 
     def discard_first(self, reason: str) -> QueuedApplication:
+        """Descarte a mano: el email no vuelve a recibir borradores."""
         item = self.pending.pop(0)
         self.contacted[item.app.to] = f"descartado: {reason}"
+        self.save()
+        return item
+
+    def drop_first(self) -> QueuedApplication:
+        """Saca el primero sin marcarlo como contactado: un fallo al armar el borrador (CV, adjunto)
+        no debe impedir postular a ese email con otra vacante."""
+        item = self.pending.pop(0)
         self.save()
         return item
 

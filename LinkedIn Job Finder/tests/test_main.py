@@ -36,7 +36,7 @@ def test_drain_queue_with_daily_limit_keeps_rest_pending(tmp_path):
     assert store.sent_on(date.today()) == 2
 
 
-def test_drain_queue_permanent_error_discards_and_continues(tmp_path):
+def test_drain_queue_permanent_error_drops_without_marking_contacted(tmp_path):
     store = _store_with(tmp_path, "bad@x.com", "ok@x.com")
 
     def sender(app: Application) -> None:
@@ -47,7 +47,7 @@ def test_drain_queue_permanent_error_discards_and_continues(tmp_path):
 
     assert sent == 1
     assert store.pending == []
-    assert store.contacted["bad@x.com"].startswith("descartado")
+    assert "bad@x.com" not in store.contacted
 
 
 def test_drain_queue_transient_error_stops_and_keeps_item(tmp_path):

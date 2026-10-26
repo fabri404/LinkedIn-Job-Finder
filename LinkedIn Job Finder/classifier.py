@@ -22,10 +22,12 @@ HIRING_SIGNAL_LABELS = frozenset({
 POSITIVE_GROUPS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (3, "frase de contratación", (
         "estamos buscando", "estamos en la búsqueda", "nos encontramos en búsqueda",
+        "nos encontramos buscando", "necesitamos incorporar", "necesitamos sumar", "busca incorporar",
+        "busca desarrollador", "busca programador", "busca analista", "busca tester", "busca un/a",
         "buscamos", "sumate a", "unite a", "se busca", "se requiere",
         "incorporar a nuestro equipo", "sumarse a nuestro equipo", "sumarse al equipo",
         "seguimos creciendo", "we are looking for", "we're looking for",
-        "we are hiring", "we're hiring", "looking to hire", "join our team",
+        "we are hiring", "we're hiring", "were hiring", "looking to hire", "join our team",
         "buscando talento", "estamos contratando", "en la búsqueda de",
     )),
     (3, "sección de requisitos", (
@@ -38,7 +40,8 @@ POSITIVE_GROUPS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "envianos tu cv", "envíanos tu cv", "enviános tu cv", "postulate",
         "postúlate", "postularse", "postularte", "apply now", "apply here",
         "send your cv", "send your resume", "escribinos a", "contactanos a",
-        "mandá tu cv", "manda tu cv", "aplica aquí", "aplicá acá",
+        "mandá tu cv", "manda tu cv", "mandanos tu cv", "mandame tu cv", "enviame tu cv", "envíame tu cv",
+        "aplica aquí", "aplicá acá",
     )),
     (3, "lista de posiciones", (
         "posiciones abiertas", "vacantes disponibles", "búsquedas abiertas",
@@ -101,7 +104,16 @@ NON_DEV_ROLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-SENIOR_PATTERN = re.compile(r"\b(senior|sr\.?|lead|líder técnico|tech lead|principal)\b")
+SENIOR_PATTERN = re.compile(
+    r"\b(senior|sr\.?|líder técnico|tech lead|team lead|lead (?:developer|engineer|dev|backend|qa)|"
+    r"principal (?:engineer|developer))\b"
+)
+# "sumarte a un equipo de devs senior": describe a los compañeros, no el puesto.
+SENIOR_TEAM_CONTEXT = re.compile(
+    r"((equipo|team) (de|of)|junto a|rodeado de|acompañad[oa] (de|por)|mentor[eí]a de|aprender de|learn from)"
+    r"[^.\n]{0,20}$"
+)
+JUNIOR_PATTERN = re.compile(r"\b(junior|jr\.?|trainee|pasant[eí]a?|entry level|sin experiencia)\b")
 # Solo para títulos de avisos: en el texto de un post "staff" suele ser "el equipo".
 ABOVE_LEVEL_TITLE_PATTERN = re.compile(
     r"\b(staff|architect|arquitect[oa]|manager|head|director|gerente|iii|iv|v)\b", re.IGNORECASE
@@ -109,10 +121,19 @@ ABOVE_LEVEL_TITLE_PATTERN = re.compile(
 LOWER_LEVEL_PATTERN = re.compile(
     r"\b(semi ?senior|ssr|junior|jr\.?|trainee|pasant[eí]a?|entry level|sin experiencia)\b"
 )
-# "5 años", "+4 años", "3-5 años", "8–12 Years", "5+ years": cuenta el mínimo del rango.
+# "5 años", "+4 años", "3-5 años", "2 a 5 años", "8–12 Years", "5+ years": cuenta el mínimo del rango.
 YEARS_PATTERN = re.compile(
     r"(?:más de |more than |over |at least |al menos |minimum |mínimo |\+ ?)?"
-    r"(\d{1,2}) ?(?:[-–] ?\d{1,2} ?)?(\+)? ?(?:años|years|yrs)"
+    r"(\d{1,2}) ?(?:(?:[-–]|a|y|to|and) ?\d{1,2} ?)?(\+)? ?(?:años|years|yrs)"
+)
+# Nadie pide 16+ años de experiencia: son edades ("mayor de 18") o la antigüedad de la empresa.
+MAX_EXPERIENCE_YEARS = 15
+YEARS_NOT_EXPERIENCE_BEFORE = re.compile(
+    r"(edad|age|aged|mayor de|menor de|empresa con|compañía con|company with|trayectoria de)[^.\n]{0,15}$"
+)
+YEARS_NOT_EXPERIENCE_AFTER = re.compile(
+    r"^[^.\n]{0,4}(de edad|en el mercado|de trayectoria|de historia|de carrera|de antigüedad|in business|"
+    r"of history|old)"
 )
 
 # Encabezado del post ("5 meses •", "2 años Seguir", "3mo •"): los grupos muestran búsquedas de hace meses.
@@ -123,7 +144,18 @@ POST_AGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 POST_HEADER_CHARS = 500
-AGE_CONTEXT_PATTERN = re.compile(r"\b(edad|age|aged)\b")
+# Primera línea que LinkedIn agrega según quién interactuó ("X recomienda esto", "A Y le gusta esto"):
+# cambia según el contexto y movía la ventana de la clave, duplicando el mismo post.
+CONTEXT_LINE = re.compile(
+    r"^[^\n]{0,120}\b(recomienda|le gusta|les gusta|le encanta|le hace gracia|apoya|comentó|ha comentado|"
+    r"compartió|ha compartido|celebra|publicación sugerida|promocionado|likes this|loves this|commented on|"
+    r"reposted|suggested|promoted)\b[^\n]*\n", re.I)
+FEED_POST_TITLES = ("publicación en el feed", "feed post")
+# Fin del encabezado del post (autor, titular, "8 h •", "1 sem Seguir"): lo que sigue es el cuerpo.
+HEADER_AGE_LINE = re.compile(
+    r"^\s*\d+\s*(?:min|h|d|día|días|sem|semana|semanas|w|mes|meses|mo|año|años|yr)\b[^\n]{0,40}$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 FOREIGN_PLACES = (
     "méxico", "mexico", "cdmx", "chile", "santiago de chile", "perú", "peru", "lima",
@@ -131,7 +163,7 @@ FOREIGN_PLACES = (
     "venezuela", "bolivia", "ecuador", "costa rica", "guatemala", "panamá",
     "españa", "madrid", "brasil", "são paulo",
     "india", "bangalore", "bengaluru", "hyderabad", "pune", "chennai", "noida", "gurgaon",
-    "mumbai", "delhi", "pakistan", "usa", "united states", "estados unidos", "canada",
+    "mumbai", "delhi", "pakistan", "united states", "estados unidos", "canada",
     "canadá", "uk", "united kingdom", "reino unido", "london", "guayaquil", "quito", "carcelén",
     "querétaro", "queretaro", "guadalajara", "monterrey", "región metropolitana", "valparaíso",
     "arequipa", "barranquilla", "cali", "caracas", "san josé", "santo domingo", "cusco", "trujillo",
@@ -156,6 +188,9 @@ OFF_PROFILE_TITLE_PATTERN = re.compile(
 )
 # Palabra completa: con substring, "lima" aparecía en "buen clima laboral" y "usa" en "causa".
 FOREIGN_PLACE_PATTERN = re.compile(r"\b(" + "|".join(map(re.escape, FOREIGN_PLACES)) + r")\b")
+# EE.UU. solo en mayúsculas: en minúsculas "usa" es un verbo.
+US_PATTERN = re.compile(r"\bUSA\b|\bEE\.? ?UU\.?")
+US_PLACES = frozenset({"united states", "estados unidos", "usa"})
 ARGENTINA_OR_REMOTE = ("argentina", "latam", "latinoamérica", "córdoba", "cordoba")
 REMOTE_TERMS = ("remoto", "remote", "home office", "100% remoto")
 ONSITE_TERMS = ("presencial", "híbrid", "hibrid", "on-site", "onsite")
@@ -175,7 +210,7 @@ OWN_EMAILS = ("fabri404lopez@gmail.com",)
 NOT_RECRUITER_MAILBOX = re.compile(
     r"^(accessibility|accommodations?|accesibilidad|privacy|privacidad|no-?reply|do-?not-?reply|eeo|legal|dpo|"
     r"compliance|datos\.personales|data\.protection|gdpr|abuse|security|cursos?|capacitaci[oó]n|training|"
-    r"ventas|sales|marketing|prensa|press|facturaci[oó]n|billing|referidos|referrals?)[._-]?[^@]*@",
+    r"ventas|sales|marketing|prensa|press|facturaci[oó]n|billing|referidos|referrals?)(?:[._-][^@]*)?@",
     re.IGNORECASE,
 )
 
@@ -247,10 +282,31 @@ def _score_groups(text_lower: str, groups, sign: int) -> list[tuple[int, str, st
     return hits
 
 
+def split_post(text: str) -> tuple[str, str]:
+    """(encabezado, cuerpo). El encabezado es autor, titular y antigüedad: "Senior IT Recruiter",
+    "10 años en RRHH" o el nombre del grupo ("Búsqueda laboral Argentina") no describen el puesto."""
+    head = text[:POST_HEADER_CHARS]
+    match = POST_AGE_ANY.search(head) or HEADER_AGE_LINE.search(head)
+    if not match:
+        return "", text
+    return text[:match.end()], text[match.end():]
+
+
+def post_author(text: str) -> str:
+    """Nombre de quien publicó: primera línea del encabezado que no es el título oculto ni el contexto."""
+    header = split_post(text)[0]
+    for line in CONTEXT_LINE.sub("", header.strip(), count=1).splitlines():
+        line = line.split("•")[0].strip()
+        if line and line.lower() not in FEED_POST_TITLES and not CONTEXT_LINE.match(line + "\n"):
+            return line[:80]
+    return ""
+
+
 def score_job_posting(text: str) -> JobScore:
-    """Puntaje de la v2: positivo si parece una oferta real, negativo si es contenido."""
+    """Puntaje de la v2: positivo si parece una oferta real, negativo si es contenido.
+    Los positivos se buscan solo en el cuerpo; los negativos ("Promocionado", "#OpenToWork"), en todo."""
     text_lower = text.lower()
-    hits = _score_groups(text_lower, POSITIVE_GROUPS, 1)
+    hits = _score_groups(split_post(text_lower)[1], POSITIVE_GROUPS, 1)
     hiring_signal = any(label in HIRING_SIGNAL_LABELS for _, label, _ in hits)
     hits += _score_groups(text_lower, NEGATIVE_GROUPS, -1)
     if extract_emails(text):
@@ -298,23 +354,46 @@ def is_dev_role(text: str, role_title: str) -> bool:
 
 
 def check_seniority(text: str) -> Verdict:
+    """Sobre el cuerpo del post: descarta si pide 5+ años (o 4+) o el puesto es Senior/Lead."""
     text_lower = text.lower()
+    has_junior = bool(JUNIOR_PATTERN.search(text_lower))
     for match in YEARS_PATTERN.finditer(text_lower):
-        if AGE_CONTEXT_PATTERN.search(text_lower[max(0, match.start() - 25):match.start()]):
-            continue  # "Edad: entre 20 y 45 años" es un rango de edad, no de experiencia
-        years = int(match.group(1))
-        has_plus = bool(match.group(2)) or match.group(0).startswith(("más de", "more than", "over", "+"))
-        if years >= 5 or (years == 4 and has_plus):
+        if _asks_experience_years(text_lower, match, has_junior):
             return Verdict(False, f"pide {match.group(0).strip()}")
-    if SENIOR_PATTERN.search(text_lower) and not LOWER_LEVEL_PATTERN.search(text_lower):
+    if _mentions_senior_role(text_lower) and not LOWER_LEVEL_PATTERN.search(text_lower):
         return Verdict(False, "nivel Senior/Lead")
     return Verdict(True, "nivel ok")
+
+
+def _asks_experience_years(text_lower: str, match: re.Match[str], has_junior: bool) -> bool:
+    years = int(match.group(1))
+    has_plus = bool(match.group(2)) or match.group(0).startswith(("más de", "more than", "over", "+"))
+    if years > MAX_EXPERIENCE_YEARS or not (years >= 5 or (years == 4 and has_plus)):
+        return False
+    before = text_lower[max(0, match.start() - 40):match.start()]
+    after = text_lower[match.end():match.end() + 30]
+    if YEARS_NOT_EXPERIENCE_BEFORE.search(before) or YEARS_NOT_EXPERIENCE_AFTER.search(after):
+        return False
+    # Post con varias búsquedas ("Python Jr" y "Java Sr con 8 años"): los años de otro puesto no
+    # descartan al junior.
+    return not (has_junior and not JUNIOR_PATTERN.search(_line_at(text_lower, match.start())))
+
+
+def _line_at(text: str, index: int) -> str:
+    start = text.rfind("\n", 0, index) + 1
+    end = text.find("\n", index)
+    return text[start:end if end != -1 else len(text)]
+
+
+def _mentions_senior_role(text_lower: str) -> bool:
+    return any(not SENIOR_TEAM_CONTEXT.search(text_lower[max(0, m.start() - 40):m.start()])
+               for m in SENIOR_PATTERN.finditer(text_lower))
 
 
 def check_location(text: str) -> Verdict:
     text_lower = text.lower()
     foreign_match = FOREIGN_PLACE_PATTERN.search(text_lower)
-    foreign = foreign_match.group(1) if foreign_match else None
+    foreign = foreign_match.group(1) if foreign_match else ("usa" if US_PATTERN.search(text) else None)
     local = any(p in text_lower for p in ARGENTINA_OR_REMOTE)
     remote = any(p in text_lower for p in REMOTE_TERMS)
     onsite = any(p in text_lower for p in ONSITE_TERMS)
@@ -325,11 +404,22 @@ def check_location(text: str) -> Verdict:
     others = _foreign_places_without_argentina(text_lower)
     if others:
         return Verdict(False, f"solo para otros países ({', '.join(others)})")
-    if foreign and not local and not (remote and "latam" in text_lower):
+    if foreign and not local and not _remote_from_abroad(foreign, text_lower):
         return Verdict(False, f"ubicación fuera de Argentina ({foreign})")
     if onsite and not remote and not in_cordoba and _mentions_other_city(text_lower):
         return Verdict(False, "presencial fuera de Córdoba")
     return Verdict(True, "ubicación ok")
+
+
+def _remote_from_abroad(foreign: str, text_lower: str) -> bool:
+    """Remoto para LATAM, o remoto para un cliente de EE.UU. en un post en castellano: se contrata
+    desde Argentina (pago en USD)."""
+    if not any(p in text_lower for p in REMOTE_TERMS):
+        return False
+    if "latam" in text_lower:
+        return True
+    onsite = any(p in text_lower for p in ONSITE_TERMS)
+    return foreign in US_PLACES and not onsite and detect_language(text_lower) == "es"
 
 
 def _foreign_places_without_argentina(text_lower: str) -> list[str]:
@@ -396,24 +486,27 @@ def detect_track(text: str, role_title: str, subject_hint: str | None) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """NFKC: las letras "negritas" de LinkedIn (𝗦𝗿, 𝗵𝗶́𝗯𝗿𝗶𝗱𝗮) pasan a texto común para los filtros."""
-    return unicodedata.normalize("NFKC", text)
+    """NFKC: las letras "negritas" de LinkedIn (𝗦𝗿, 𝗵𝗶́𝗯𝗿𝗶𝗱𝗮) pasan a texto común para los filtros;
+    el apóstrofo curvo ("We’re hiring") pasa a recto."""
+    return unicodedata.normalize("NFKC", text).replace("’", "'")
 
 
 def check_vacancy(text: str, keywords: list[str]) -> Verdict:
-    """Todo el filtro salvo el email: oferta real → reciente → rol dev → nivel → ubicación."""
+    """Todo el filtro salvo el email: oferta real → reciente → rol dev → nivel → ubicación.
+    Rol, nivel y ubicación miran solo el cuerpo: el titular del autor no es el puesto."""
     score = score_job_posting(text)
     if not score.is_job:
         return Verdict(False, f"no es oferta (score {score.score})")
     age = POST_AGE_PATTERN.search(text[:POST_HEADER_CHARS])
     if age:
         return Verdict(False, f"publicado hace {age.group(0).strip(' •')}")
-    if not matches_keywords(text, keywords):
+    body = split_post(text)[1]
+    if not matches_keywords(body, keywords):
         return Verdict(False, "sin keywords")
-    if not is_dev_role(text, extract_role_title(text)):
+    if not is_dev_role(body, extract_role_title(body)):
         return Verdict(False, "rol fuera del perfil")
     for check in (check_seniority, check_location):
-        verdict = check(text)
+        verdict = check(body)
         if not verdict.accepted:
             return verdict
     return Verdict(True, f"apto (score {score.score})")
@@ -446,14 +539,16 @@ def post_age_days(text: str) -> int | None:
 
 
 def evaluate_post(text: str, keywords: list[str]) -> tuple[Verdict, JobPosting | None]:
-    """Filtro completo: oferta real → rol dev → nivel → ubicación → email."""
+    """Filtro completo: oferta real → rol dev → nivel → ubicación → email.
+    El posting viene con el veredicto aceptado, o rechazado solo por "sin email"."""
     text = normalize_text(text)
     verdict = check_vacancy(text, keywords)
     if not verdict.accepted:
         return verdict, None
     emails = extract_emails(text)
     if not emails:
-        return Verdict(False, "sin email"), None
+        # Vacante acorde sin email: se devuelve igual para dejarla en la lista de contacto por LinkedIn.
+        return Verdict(False, "sin email"), _build_posting(text, ())
     if _foreign_recruiter(emails, text):
         return Verdict(False, f"email de otro país ({emails[0]})"), None
     return verdict, _build_posting(text, emails)
@@ -491,12 +586,13 @@ def evaluate_job(title: str, text: str) -> tuple[Verdict, JobPosting | None]:
 
 
 def _build_posting(text: str, emails: tuple[str, ...], role_title: str = "") -> JobPosting:
-    role_title = role_title or extract_role_title(text)
+    body = split_post(text)[1]
+    role_title = role_title or extract_role_title(body)
     subject_hint, asks_subject = extract_subject_hint(text)
     return JobPosting(
         text=text,
         emails=emails,
-        language=detect_language(text),
+        language=detect_language(body),
         role_title=role_title,
         track=detect_track(text, role_title, subject_hint),
         subject_hint=subject_hint,

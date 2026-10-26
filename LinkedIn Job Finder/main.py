@@ -28,7 +28,7 @@ import urllib3
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 
-from classifier import JobPosting, evaluate_job, evaluate_post, evaluate_vacancy, is_profile_title
+from classifier import JobPosting, evaluate_job, evaluate_post, evaluate_vacancy, is_profile_title, post_author
 from composer import URL_PATTERN, Application, Outreach, compose, compose_outreach, linkedin_message, select_cv
 from config import (
     BASE_DIR,
@@ -70,6 +70,7 @@ from recruiters import (
     recruiter_pause,
     safe_search,
 )
+from relevance import relevance_score
 from sources import plan_sources
 from store import VETO_FILE, QueuedApplication, Store
 
@@ -136,22 +137,38 @@ def enqueue_new_posts(posts: list[FeedPost], ctx: LoopContext) -> int:
             continue
         ctx.store.mark_seen(post.key)
         verdict, posting = evaluate_post(post.text, ctx.keywords)
-        log.info("%s %s | %s", "APTO" if posting else "desc", verdict.reason, _preview(post.text))
-        if posting is not None:
-            log.info("  texto: %s", " ".join(post.text.split())[:800])  # para auditar falsos aptos
-            queued += _enqueue_posting(posting, post.url, ctx)
+        log.info("%s %s | %s", "APTO" if verdict.accepted else "desc", verdict.reason, _preview(post.text))
+        if posting is None:
+            continue
+        if not verdict.accepted:
+            _record_post_lead(post, posting, ctx)
+            continue
+        log.info("  texto: %s", " ".join(post.text.split())[:800])  # para auditar falsos aptos
+        queued += _enqueue_posting(posting, post.url, ctx)
     ctx.store.save()
     return queued
 
 
+def _record_post_lead(post: FeedPost, posting: JobPosting, ctx: LoopContext) -> None:
+    """Vacante acorde sin email: queda en la lista para escribirle a quien la publicó por LinkedIn."""
+    author = post_author(post.text)
+    links = " ".join(dict.fromkeys(URL_PATTERN.findall(post.text)))
+    first_name = author.split()[0] if author else ""
+    ctx.store.record_lead((date.today().isoformat(), author, "", posting.role_title, post.url, links,
+                           linkedin_message(first_name, posting)))
+    log.info("LINKEDIN → %s | %s | %s", author or "?", posting.role_title, post.url)
+
+
 def _enqueue_posting(posting: JobPosting, post_url: str, ctx: LoopContext) -> int:
     queued = 0
+    score = relevance_score(posting)
     for email in posting.emails:
-        if ctx.store.is_known_recipient(email):
+        if ctx.store.is_known_recipient(email, posting.role_title):
             log.info("  ya contactado: %s", email)
             continue
         app = compose(posting, email, ctx.settings.mail.cv_dir)
-        ctx.store.enqueue(QueuedApplication(app, post_url))
+        ctx.store.enqueue(QueuedApplication(app, post_url, score))
+        log.info("  en cola (relevancia %d): %s | %s", score, email, posting.role_title)
         queued += 1
     return queued
 
@@ -176,7 +193,7 @@ def drain_queue(store: Store, run: RunSettings, sender: Sender) -> int:
             log.error("No se envió a %s: %s", item.app.to, exc)
             if not exc.permanent:
                 break
-            store.discard_first(str(exc))
+            store.drop_first()
             continue
         store.complete_first(datetime.now())
         sent += 1

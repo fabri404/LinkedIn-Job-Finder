@@ -28,6 +28,8 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions.wheel_input import ScrollOrigin
 from selenium.webdriver.common.by import By
 
+from classifier import CONTEXT_LINE
+
 if TYPE_CHECKING:
     from sources import Source
 
@@ -84,14 +86,6 @@ class FeedPost:
     key: str
     text: str
     url: str
-
-
-# Primera línea que LinkedIn agrega según quién interactuó ("X recomienda esto", "A Y le gusta esto"):
-# cambia según el contexto y movía la ventana de la clave, duplicando el mismo post.
-CONTEXT_LINE = re.compile(
-    r"^[^\n]{0,120}\b(recomienda|le gusta|les gusta|le encanta|le hace gracia|apoya|comentó|ha comentado|"
-    r"compartió|ha compartido|celebra|publicación sugerida|promocionado|likes this|loves this|commented on|"
-    r"reposted|suggested|promoted)\b[^\n]*\n", re.I)
 
 
 def post_key(text: str) -> str:
