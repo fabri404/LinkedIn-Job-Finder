@@ -202,3 +202,20 @@ def test_new_recruiters_fills_budget_across_pages(tmp_path, monkeypatch):
     # Assert
     assert [c.slug for c in cards] == ["a", "b", "c"]
     assert ctx.store.search_pages["IT recruiter"] == 3
+
+
+def test_recent_posts_calls_harvest_page_with_a_source(monkeypatch):
+    # Arrange
+    import recruiters
+    from sources import Source
+
+    calls = []
+    monkeypatch.setattr(recruiters, "harvest_page", lambda _d, source, is_seen: calls.append((source, is_seen("k"))) or [])
+    card = recruiters.RecruiterCard("ana-gomez", "Ana Gómez", "IT Recruiter")
+
+    # Act
+    recruiters.recent_posts(None, card)
+
+    # Assert
+    assert isinstance(calls[0][0], Source) and "ana-gomez" in calls[0][0].url
+    assert calls[0][1] is False

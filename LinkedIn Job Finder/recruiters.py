@@ -20,6 +20,7 @@ from selenium.webdriver.common.by import By
 
 from classifier import extract_emails, normalize_text, post_age_days
 from feed import FeedPost, harvest_page, open_url
+from sources import PAGE_IDLE_LIMIT, Source
 
 log = logging.getLogger(__name__)
 
@@ -123,9 +124,15 @@ def search_recruiters(driver: webdriver.Chrome, query: str, page: int) -> list[R
     return cards
 
 
+def _nothing_seen(_key: str) -> bool:
+    return False
+
+
 def recent_posts(driver: webdriver.Chrome, card: RecruiterCard) -> list[FeedPost]:
     """Posts del recruiter de los últimos RECENT_DAYS días (sin antigüedad visible, se descarta)."""
-    posts = harvest_page(driver, ACTIVITY_URL.format(slug=card.slug), ACTIVITY_MINUTES)
+    # Se leen todos (no se corta por "vistos"): enqueue_new_posts ya saltea los que se evaluaron.
+    source = Source(ACTIVITY_URL.format(slug=card.slug), ACTIVITY_MINUTES, PAGE_IDLE_LIMIT)
+    posts = harvest_page(driver, source, _nothing_seen)
     recent = [p for p in posts if (age := post_age_days(p.text)) is not None and age <= RECENT_DAYS]
     log.info("  %s: %d posts, %d de los últimos %d días.", card.name, len(posts), len(recent), RECENT_DAYS)
     return recent
