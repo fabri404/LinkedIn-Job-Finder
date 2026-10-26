@@ -12,6 +12,8 @@ import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date
+from pathlib import Path
+from typing import TypeVar
 from urllib.parse import quote, unquote
 
 from config import BASE_DIR
@@ -30,6 +32,27 @@ IMPORTANT_LOG = re.compile(r"BORRADOR|EMPLEO →|LINKEDIN →|RECRUITER →|ERRO
 SOURCE_LOG = re.compile(r"^(?P<url>https://\S+?)(?::| trabado)")
 START_MARK = "Job Finder v3"
 ALERT_MARKS = ("checkpoint", "Iniciá sesión")
+
+
+T = TypeVar("T")
+# Último contenido leído de cada archivo, con su (mtime, tamaño): el panel pide el estado cada
+# pocos segundos y la mayoría de las veces nada cambió.
+_file_cache: dict[Path, tuple[tuple[int, int], object]] = {}
+
+
+def _cached(path: Path, load: Callable[[], T]) -> T:
+    """`load()` solo si `path` cambió desde la última lectura."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return load()
+    signature = (stat.st_mtime_ns, stat.st_size)
+    hit = _file_cache.get(path)
+    if hit is not None and hit[0] == signature:
+        return hit[1]  # type: ignore[return-value]
+    value = load()
+    _file_cache[path] = (signature, value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -55,14 +78,21 @@ def read_csv_rows(name: str, limit: int) -> list[dict[str, str]]:
     path = DATA_DIR / name
     if not path.exists():
         return []
-    with path.open(encoding="utf-8", newline="") as file:
-        rows = list(csv.DictReader(file))
-    return rows[::-1][:limit]
+
+    def load() -> list[dict[str, str]]:
+        with path.open(encoding="utf-8", newline="") as file:
+            return list(csv.DictReader(file))
+
+    return _cached(path, load)[::-1][:limit]
 
 
 def _log_tail() -> list[LogEntry]:
     if not LOG_FILE.exists():
         return []
+    return _cached(LOG_FILE, _read_log_tail)
+
+
+def _read_log_tail() -> list[LogEntry]:
     with LOG_FILE.open("rb") as file:
         file.seek(max(0, LOG_FILE.stat().st_size - LOG_TAIL_BYTES))
         lines = file.read().decode("utf-8", errors="replace").splitlines()
@@ -95,8 +125,9 @@ def _last(entries: list[LogEntry], predicate: Callable[[LogEntry], bool]) -> Log
 
 
 def _pending_count() -> int:
+    path = DATA_DIR / "state.json"
     try:
-        return len(json.loads((DATA_DIR / "state.json").read_text(encoding="utf-8")).get("pending", []))
+        return _cached(path, lambda: len(json.loads(path.read_text(encoding="utf-8")).get("pending", [])))
     except (OSError, ValueError):
         return 0
 

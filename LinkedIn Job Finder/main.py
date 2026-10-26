@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import logging.handlers
 import random
 import signal
 import subprocess
@@ -75,6 +76,13 @@ from sources import plan_sources
 from store import VETO_FILE, QueuedApplication, Store
 
 log = logging.getLogger("job_finder")
+# Una línea por post evaluado: va a data/audit.log para que job_finder.log (el que lee el
+# dashboard) quede corto y legible.
+audit = logging.getLogger("job_finder.audit")
+LOG_MAX_BYTES = 2_000_000
+LOG_BACKUPS = 3
+# Sin nada nuevo en la vuelta, la pausa se duplica hasta este tope; con algo nuevo vuelve a la base.
+MAX_PAUSE_MINUTES = 60
 PREVIOUS_CONTACTS_FILE = BASE_DIR / "contactados_previos.txt"
 CHECKPOINT_PATH = "/checkpoint/"
 CURSOR_KEY = "source_cursor"
@@ -121,6 +129,16 @@ class LoopContext:
         self.recruiter_cycle = 0
         self.follows: dict[str, int] = {}
         self.allow_follow = True
+        self.gmail_checked = False
+        self.found_last_cycle = 0
+        self.idle_cycles = 0
+
+
+def _rotating_handler(path: Path) -> logging.Handler:
+    handler = logging.handlers.RotatingFileHandler(path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS,
+                                                   encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    return handler
 
 
 def setup_logging(settings: Settings) -> None:
@@ -128,11 +146,10 @@ def setup_logging(settings: Settings) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(settings.state_dir / "job_finder.log", encoding="utf-8"),
-        ],
+        handlers=[logging.StreamHandler(sys.stdout), _rotating_handler(settings.state_dir / "job_finder.log")],
     )
+    audit.propagate = False
+    audit.addHandler(_rotating_handler(settings.state_dir / "audit.log"))
 
 
 def _preview(text: str) -> str:
@@ -146,13 +163,13 @@ def enqueue_new_posts(posts: list[FeedPost], ctx: LoopContext) -> int:
             continue
         ctx.store.mark_seen(post.key)
         verdict, posting = evaluate_post(post.text, ctx.keywords)
-        log.info("%s %s | %s", "APTO" if verdict.accepted else "desc", verdict.reason, _preview(post.text))
+        audit.info("%s %s | %s", "APTO" if verdict.accepted else "desc", verdict.reason, _preview(post.text))
         if posting is None:
             continue
         if not verdict.accepted:
             _record_post_lead(post, posting, ctx)
             continue
-        log.info("  texto: %s", " ".join(post.text.split())[:800])  # para auditar falsos aptos
+        audit.info("  texto: %s", " ".join(post.text.split())[:800])  # para auditar falsos aptos
         queued += _enqueue_posting(posting, post.url, ctx)
     ctx.store.save()
     return queued
@@ -273,7 +290,7 @@ def process_job_card(card: JobCard, ctx: LoopContext) -> int:
     description = fetch_description(card)
     ctx.store.mark_seen(card.key)
     verdict, posting = evaluate_job(card.title, f"{card.title}\n{card.company}\n{card.location}\n{description}")
-    log.info("%s empleo %s | %s | %s", "APTO" if posting else "desc", verdict.reason, card.title, card.company)
+    audit.info("%s empleo %s | %s | %s", "APTO" if posting else "desc", verdict.reason, card.title, card.company)
     if posting is None:
         return 0
     if posting.emails:
@@ -291,7 +308,7 @@ def _evaluate_job_cards(cards: list[JobCard], ctx: LoopContext) -> int:
     found = details = 0
     for card in cards:
         if not is_profile_title(card.title):
-            log.info("desc empleo título fuera del perfil | %s | %s", card.title, card.company)
+            audit.info("desc empleo título fuera del perfil | %s | %s", card.title, card.company)
             ctx.store.mark_seen(card.key)
             continue
         if details == MAX_DETAILS_PER_CYCLE:
@@ -434,6 +451,7 @@ def run_cycle(driver: webdriver.Chrome, ctx: LoopContext) -> None:
     sent += drain()
     read, queued, sent_from_sources = harvest_sources(driver, ctx, drain)
     sent += sent_from_sources
+    ctx.found_last_cycle = queued + jobs + recruiters
     log.info("Vuelta: %d posts, %d nuevos en cola, %d de Empleos, %d de recruiters, %d borradores, %d pendientes, "
              "%d hoy.", read, queued, jobs, recruiters, sent, len(ctx.store.pending), ctx.store.sent_on(date.today()))
 
@@ -443,15 +461,23 @@ CHROME_ERRORS = (WebDriverException, urllib3.exceptions.HTTPError, OSError)
 RETRY_AFTER_HANG_MINUTES = 1
 
 
-def open_feed(settings: Settings, dry_run: bool) -> webdriver.Chrome:
+def open_feed(settings: Settings) -> webdriver.Chrome:
     driver = create_driver(settings.chrome_profile_dir, settings.chrome_headless)
     if not wait_for_login(driver):
         driver.quit()
         raise SystemExit("No se inició sesión en LinkedIn a tiempo.")
-    if not dry_run and not wait_for_gmail_login(driver):
+    return driver
+
+
+def ensure_gmail_session(driver: webdriver.Chrome, ctx: LoopContext) -> None:
+    """Abre Gmail solo en la primera vuelta del proceso: la sesión queda en el perfil y, si vence,
+    el borrador siguiente falla con AuthError y frena el loop igual."""
+    if ctx.gmail_checked:
+        return
+    if not wait_for_gmail_login(driver):
         driver.quit()
         raise SystemExit("No se inició sesión en Gmail a tiempo (pestaña aparte del Chrome del loop).")
-    return driver
+    ctx.gmail_checked = True
 
 
 def kill_chrome(driver: webdriver.Chrome | None, profile_dir: Path) -> None:
@@ -470,7 +496,9 @@ def run_fresh_cycle(ctx: LoopContext, dry_run: bool) -> bool:
     driver: webdriver.Chrome | None = None
     closed = False
     try:
-        driver = open_feed(ctx.settings, dry_run)
+        driver = open_feed(ctx.settings)
+        if not dry_run:
+            ensure_gmail_session(driver, ctx)
         run_cycle(driver, ctx)
         driver.quit()
         closed = True
@@ -492,9 +520,16 @@ def run_loop(ctx: LoopContext, args: argparse.Namespace) -> None:
         if not completed:
             time.sleep(RETRY_AFTER_HANG_MINUTES * 60)
             continue
-        pause = random.uniform(ctx.settings.run.pause_minutes_min, ctx.settings.run.pause_minutes_max)
-        log.info("Pausa de %.0f min antes del próximo F5.", pause)
+        ctx.idle_cycles = 0 if ctx.found_last_cycle else ctx.idle_cycles + 1
+        pause = next_pause_minutes(ctx.settings.run, ctx.idle_cycles)
+        log.info("Pausa de %.0f min antes del próximo F5 (%d vueltas seguidas sin novedades).", pause, ctx.idle_cycles)
         time.sleep(pause * 60)
+
+
+def next_pause_minutes(run: RunSettings, idle_cycles: int) -> float:
+    """Pausa base al azar, duplicada por cada vuelta seguida sin novedades, con tope MAX_PAUSE_MINUTES."""
+    base = random.uniform(run.pause_minutes_min, run.pause_minutes_max)
+    return min(MAX_PAUSE_MINUTES, base * 2 ** min(idle_cycles, 6))
 
 
 def _log_only(_driver: webdriver.Chrome) -> Sender:

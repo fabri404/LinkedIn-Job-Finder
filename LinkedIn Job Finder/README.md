@@ -131,38 +131,58 @@ devops
 programador
 ```
 
-### Configuración — `config.py`
+### Cómo se arma cada vuelta
 
-- `MIN_KEYWORDS_MATCH`: Cantidad mínima de keywords que debe tener un post para pasar el primer filtro (default: 1).
+1. **Empleos** (HTTP, sin Chrome): búsquedas de `job_queries.txt` en la sección Empleos, solo avisos con
+   Solicitud sencilla de las últimas 24 h. Si el formulario queda completo con datos verificados
+   (`answers.py`), **la solicitud se envía**; si falta algo, se guarda en LinkedIn → Mis empleos → En curso.
+2. **Búsquedas de publicaciones** de `channels.txt` ("enviar cv" + un término), todas, primero.
+3. **Grupos y páginas de empresa**: 8 por vuelta, rotando.
+4. **Feed**, al final.
 
-### Credenciales — `.env`
+Cada fuente se deja de scrollear cuando unas pocas lecturas seguidas no traen posts nuevos, y la
+fuente por la que va la vuelta queda guardada: un reinicio retoma desde ahí. Si una vuelta no
+encuentra nada, la pausa siguiente se duplica (tope 60 min).
 
-```
-LINKEDIN_USER=tu_email@gmail.com
-LINKEDIN_PASS=tu_contraseña
-```
+Las ofertas aptas con email van a la cola de borradores ordenadas por relevancia (Python/QA/junior
+primero, Java/.NET/PHP al final). Las aptas **sin email** quedan en la pestaña "Vacantes para
+contactar por LinkedIn" del dashboard con un mensaje sugerido.
 
-## Estructura del proyecto
+### Variables de entorno — `.env`
 
-```
-linkedin_job_finder/
-├── main.py           # Orquestador principal
-├── scraper.py        # Scraping, análisis inteligente y verificación
-├── config.py         # Configuración y carga de keywords
-├── keywords.txt      # Palabras clave de búsqueda
-├── requirements.txt  # Dependencias Python
-├── .env.example      # Template de credenciales
-├── .env              # Tus credenciales (no commitear)
-├── .gitignore        # Archivos excluidos del repo
-└── seen_posts.txt    # Registro de posts ya procesados (auto-generado)
-```
+| Variable | Default | Qué hace |
+|---|---|---|
+| `CV_DIR` | `~/Documentos/ADRIEL/cv/2026-10_relanzamiento/02_cv` | Carpeta con los CVs (requerida) |
+| `CHROME_HEADLESS` | `1` | `0` abre Chrome con ventana (para iniciar sesión) |
+| `CHROME_PROFILE_DIR` | `~/.config/linkedin-job-finder/chrome-profile` | Perfil de Chrome del loop |
+| `SCROLL_MINUTES` | `8` | Tope de minutos de feed por vuelta |
+| `CHANNEL_SCROLL_MINUTES` | `2` | Tope de minutos por búsqueda, grupo o página |
+| `PAUSE_MINUTES_MIN` / `PAUSE_MINUTES_MAX` | `8` / `15` | Pausa base entre vueltas |
+| `DAILY_SEND_LIMIT` | `100` | Borradores de Gmail por día |
+| `EASY_APPLY_DAILY_LIMIT` | `25` | Solicitudes sencillas enviadas solas por día (`0` = solo guardar) |
+| `STATE_DIR` | `data/` | Estado, CSVs y logs |
+
+### Archivos de `data/`
+
+| Archivo | Contenido |
+|---|---|
+| `state.json` | Posts vistos (se olvidan a los 60 días), cola de borradores, progreso de la vuelta |
+| `enviados.csv` | Borradores creados |
+| `empleos_linkedin.csv` | Avisos de Empleos y qué pasó con su Solicitud sencilla (`enviada`, `guardada incompleta`…) |
+| `contactar_linkedin.csv` | Vacantes aptas sin email, para escribir por LinkedIn |
+| `job_finder.log` | Actividad (lo que muestra el dashboard), rota a los 2 MB |
+| `audit.log` | Un renglón por post evaluado, con el motivo del descarte |
+| `descartar.txt` | Emails a sacar de la cola a mano (uno por línea) |
 
 ## Notas importantes
 
-- **Verificación de seguridad**: LinkedIn puede pedir un captcha la primera vez. El script pausa y te deja resolverlo manualmente antes de continuar.
-- **Anti-detección**: El script incluye medidas para evitar la detección como bot (delays entre acciones, flags de Chrome, property overrides). No lo ejecutes muchas veces seguidas.
-- **Sin duplicados**: Los posts procesados se guardan en `seen_posts.txt`. En la siguiente ejecución no se vuelven a analizar. Si querés empezar de cero, borrá ese archivo.
-- **Solo lectura**: La herramienta no interactúa con las publicaciones, no envía mensajes ni realiza acciones en tu cuenta. Solo lee el feed y abre pestañas.
+- **Envía postulaciones**: las Solicitudes sencillas completas se envían solas (hasta
+  `EASY_APPLY_DAILY_LIMIT` por día). Los mails nunca se envían: quedan como borradores en Gmail.
+- **Verificación de seguridad**: si LinkedIn pide un checkpoint, el loop se frena; resolvelo con
+  "Con ventana (login)" en el dashboard.
+- **Recontacto**: a un mismo email no se le escribe dos veces por el mismo puesto, ni dos veces en 14 días.
+- **Liviano en segundo plano**: corre con prioridad baja (`nice`/`ionice`), Chrome sin imágenes,
+  video ni fuentes mientras scrollea, y el dashboard solo consulta cada 15 s con la pestaña visible.
 
 ## Construido con IA
 

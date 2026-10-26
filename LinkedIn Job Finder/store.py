@@ -26,6 +26,9 @@ LEADS_CSV = "contactar_linkedin.csv"
 LEADS_CSV_HEADER = ("fecha", "recruiter", "perfil", "puesto", "post", "links", "mensaje")
 # A un mismo email se le puede mandar otra vacante (otro puesto) pasados estos días.
 RECONTACT_AFTER = timedelta(days=14)
+# Posts y avisos vistos se olvidan a los 60 días: nada tan viejo vuelve a aparecer en las búsquedas
+# (son de la última semana) y el estado deja de crecer sin límite.
+SEEN_RETENTION = timedelta(days=60)
 LEVEL_WORDS = re.compile(r"\b(junior|jr|semi ?senior|ssr|senior|sr|trainee|a|o|de|del|la|el)\b")
 
 
@@ -34,6 +37,15 @@ def normalize_role(role: str) -> str:
     text = unicodedata.normalize("NFKD", role.lower()).encode("ascii", "ignore").decode()
     text = LEVEL_WORDS.sub(" ", re.sub(r"[^a-z0-9#+ ]", " ", text))
     return " ".join(text.split())
+
+
+def _recent_seen(raw: list[str] | dict[str, str]) -> dict[str, str]:
+    """Vistos de los últimos SEEN_RETENTION días. El formato viejo (lista sin fechas) cuenta como de hoy."""
+    today = date.today()
+    if isinstance(raw, list):
+        return dict.fromkeys(raw, today.isoformat())
+    cutoff = (today - SEEN_RETENTION).isoformat()
+    return {key: day for key, day in raw.items() if day >= cutoff}
 
 
 @dataclass(frozen=True)
@@ -59,13 +71,14 @@ class QueuedApplication:
 @dataclass
 class Store:
     state_dir: Path
-    seen: set[str] = field(default_factory=set)
+    seen: dict[str, str] = field(default_factory=dict)  # clave → fecha en que se vio
     contacted: dict[str, str] = field(default_factory=dict)
     pending: list[QueuedApplication] = field(default_factory=list)
     profile_visits: dict[str, int] = field(default_factory=dict)
     search_pages: dict[str, int] = field(default_factory=dict)
     # Fuente por la que sigue la vuelta y vuelta de rotación: sobreviven a un reinicio.
     progress: dict[str, int] = field(default_factory=dict)
+    _saved: str = field(default="", repr=False, compare=False)
 
     @classmethod
     def load(cls, state_dir: Path) -> Store:
@@ -75,28 +88,33 @@ class Store:
             return cls(state_dir)
         data = json.loads(path.read_text(encoding="utf-8"))
         pending = [QueuedApplication.from_dict(item) for item in data.get("pending", [])]
-        return cls(state_dir, set(data.get("seen", [])), dict(data.get("contacted", {})), pending,
+        return cls(state_dir, _recent_seen(data.get("seen", {})), dict(data.get("contacted", {})), pending,
                    dict(data.get("profile_visits", {})), dict(data.get("search_pages", {})),
                    dict(data.get("progress", {})))
 
     def save(self) -> None:
+        """Escribe state.json solo si algo cambió desde el último guardado (se llama tras cada fuente)."""
         data = {
-            "seen": sorted(self.seen),
+            "seen": self.seen,
             "contacted": self.contacted,
             "pending": [item.to_dict() for item in self.pending],
             "profile_visits": self.profile_visits,
             "search_pages": self.search_pages,
             "progress": self.progress,
         }
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        if payload == self._saved:
+            return
         tmp = self.state_dir / f"{STATE_FILE}.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.write_text(payload, encoding="utf-8")
         tmp.replace(self.state_dir / STATE_FILE)
+        self._saved = payload
 
     def is_seen(self, key: str) -> bool:
         return key in self.seen
 
     def mark_seen(self, key: str) -> None:
-        self.seen.add(key)
+        self.seen.setdefault(key, date.today().isoformat())
 
     def import_previous_contacts(self, emails: list[str]) -> None:
         for email in emails:

@@ -211,8 +211,11 @@ document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
 async function tick() {
   try { await refreshStatus(); await refreshPanel(); } catch (err) { $("state").textContent = "Sin conexión con el dashboard"; }
 }
+// Cada 15 s y solo con la pestaña a la vista: oculta no pide nada al servidor.
+const POLL_MS = 15000;
 tick();
-setInterval(tick, 5000);
+setInterval(() => { if (!document.hidden) tick(); }, POLL_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 </script>
 </body>
 </html>

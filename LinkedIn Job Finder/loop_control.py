@@ -13,10 +13,12 @@ import time
 from enum import Enum
 from pathlib import Path
 
-from config import BASE_DIR
+from config import BASE_DIR, load_settings
 
 PROC_DIR = Path("/proc")
 INHIBIT = ["systemd-inhibit", "--what=idle:sleep", "--who=LinkedIn Job Finder", "--why=Loop de postulaciones"]
+# Prioridad baja de CPU y disco: Chrome la hereda y el resto de la notebook no se traba.
+LOW_PRIORITY = ["nice", "-n", "10", "ionice", "-c", "3"]
 STOP_TIMEOUT_S = 40
 
 
@@ -56,7 +58,7 @@ def find_loop_pid(proc_dir: Path = PROC_DIR) -> int | None:
 
 def loop_command(mode: LoopMode) -> list[str]:
     once = ["--once"] if mode is LoopMode.ONCE else []
-    return [*INHIBIT, sys.executable, "main.py", *once]
+    return [*INHIBIT, *LOW_PRIORITY, sys.executable, "main.py", *once]
 
 
 def start_loop(mode: LoopMode) -> int:
@@ -71,14 +73,31 @@ def start_loop(mode: LoopMode) -> int:
 
 
 def stop_loop() -> bool:
-    """SIGTERM (el loop cierra Chrome y guarda el estado) y espera a que termine."""
+    """SIGTERM (el loop cierra Chrome y guarda el estado) y espera a que termine. Si sigue vivo
+    (colgado esperando a chromedriver), lo mata junto con su Chrome para no dejar procesos huérfanos."""
     pid = find_loop_pid()
     if pid is None:
         return True
     os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + STOP_TIMEOUT_S
+    if _wait_until_stopped(STOP_TIMEOUT_S):
+        return True
+    _force_kill(pid)
+    return _wait_until_stopped(5)
+
+
+def _wait_until_stopped(timeout_s: float) -> bool:
+    deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if find_loop_pid() is None:
             return True
         time.sleep(1)
     return False
+
+
+def _force_kill(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    profile = load_settings().chrome_profile_dir
+    subprocess.run(["pkill", "-KILL", "-f", "--", f"--user-data-dir={profile}"], check=False)

@@ -42,7 +42,20 @@ STALL_SECONDS = 45
 MAX_RELOADS_PER_PAGE = 3
 WHEEL_TICKS = 4
 WHEEL_DELTA_PX = 300
-HEADLESS_WINDOW_SIZE = "1366,900"
+HEADLESS_WINDOW_SIZE = "1280,800"
+# Servicios de fondo de Chrome que el loop no usa: red, CPU y memoria de más en cada vuelta.
+LIGHT_FLAGS = (
+    "--disable-extensions", "--disable-background-networking", "--disable-component-update",
+    "--disable-sync", "--disable-default-apps", "--no-first-run", "--disable-breakpad",
+    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication",
+    "--disk-cache-size=50000000", "--force-device-scale-factor=1",
+)
+# Siempre: video, audio y beacons de analítica. Al scrollear fuentes además imágenes y fuentes
+# tipográficas (el texto de los posts no las necesita), salvo en páginas de empresa, que sin
+# imágenes no terminan de cargar los posts.
+# La telemetría propia de LinkedIn (/li/track) no se bloquea: sin ella el tráfico se ve menos humano.
+ALWAYS_BLOCKED = ("*.mp4", "*.m3u8", "*.webm", "*dms/playlist*", "*doubleclick.net*", "*google-analytics.com*")
+SCROLL_BLOCKED = (*ALWAYS_BLOCKED, "*media.licdn.com/dms/image*", "*.woff2")
 
 # UI 2026: clases ofuscadas, cada post es un [role=listitem] con un h2 oculto
 # "Publicación en el feed". Se mantiene el selector de la UI vieja como respaldo.
@@ -109,13 +122,16 @@ def create_driver(profile_dir: Path, headless: bool) -> webdriver.Chrome:
     if headless:
         options.add_argument("--headless=new")
         options.add_argument(f"--window-size={HEADLESS_WINDOW_SIZE}")
-    options.add_argument("--start-maximized")
+    else:
+        options.add_argument("--start-maximized")
+        # Con ventana, que Chrome no congele el render si queda tapada o en segundo plano: sin
+        # render, LinkedIn no carga más posts. Headless no tiene ventana que tapar.
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-renderer-backgrounding")
+        options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--disable-notifications")
-    # Que Chrome no congele el render si la ventana queda tapada o en segundo plano:
-    # sin render, LinkedIn no dispara la carga de más posts.
-    options.add_argument("--disable-backgrounding-occluded-windows")
-    options.add_argument("--disable-renderer-backgrounding")
-    options.add_argument("--disable-background-timer-throttling")
+    for flag in LIGHT_FLAGS:
+        options.add_argument(flag)
     # Sin autoplay de videos, que pesan en memoria. Las imágenes no se pueden apagar:
     # sin ellas las páginas de empresa nunca terminan de cargar los posts.
     options.add_argument("--autoplay-policy=user-gesture-required")
@@ -128,7 +144,13 @@ def create_driver(profile_dir: Path, headless: bool) -> webdriver.Chrome:
     driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_S)
     if headless:
         hide_headless_user_agent(driver)
+    driver.execute_cdp_cmd("Network.enable", {})
+    block_resources(driver, ALWAYS_BLOCKED)
     return driver
+
+
+def block_resources(driver: webdriver.Chrome, patterns: tuple[str, ...]) -> None:
+    driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": list(patterns)})
 
 
 def hide_headless_user_agent(driver: webdriver.Chrome) -> None:
@@ -243,6 +265,8 @@ def _scroll_until_idle(driver: webdriver.Chrome, source: Source, is_seen: Callab
 
 def harvest_page(driver: webdriver.Chrome, source: Source, is_seen: Callable[[str], bool]) -> list[FeedPost]:
     """Carga la fuente (feed, grupo, empresa o búsqueda) y acumula cada post hasta agotarla."""
+    log.info("%s: abriendo.", source.url)
+    block_resources(driver, ALWAYS_BLOCKED if "/company/" in source.url else SCROLL_BLOCKED)
     open_url(driver, source.url)
     time.sleep(4)
     posts = _scroll_until_idle(driver, source, is_seen)
@@ -252,6 +276,7 @@ def harvest_page(driver: webdriver.Chrome, source: Source, is_seen: Callable[[st
     else:
         log.warning("%s: 0 posts leídos (¿la página no cargó o cambió el HTML de LinkedIn?).", source.url)
     open_url(driver, "about:blank")  # suelta el DOM del feed: cientos de posts pesan varios GB
+    block_resources(driver, ALWAYS_BLOCKED)  # Gmail y Solicitud sencilla usan imágenes y fuentes
     return list(posts.values())
 
 
