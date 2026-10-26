@@ -27,8 +27,9 @@ PAGES_PER_QUERY = 2
 PAGE_SIZE = 10
 # LinkedIn sin sesión responde 429 tras unos pocos pedidos seguidos: pocas búsquedas por
 # vuelta (rotando), pocas descripciones, y si igual corta, una hora sin pedirle nada.
+# Las vueltas ahora duran minutos y no horas: 3 búsquedas por vuelta ya recorren todas varias veces al día.
 QUERIES_PER_CYCLE = 3
-MAX_DETAILS_PER_CYCLE = 6
+MAX_DETAILS_PER_CYCLE = 10
 COOLDOWN_AFTER_429_S = 60 * 60
 TIMEOUT_S = 20
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -113,9 +114,11 @@ def search_cards(query: str) -> list[JobCard]:
     """Avisos de las últimas 24 h en Argentina para `query`, hasta PAGES_PER_QUERY páginas."""
     cards: list[JobCard] = []
     for page in range(PAGES_PER_QUERY):
+        # f_AL: solo Solicitud sencilla (lo que se puede postular solo); sortBy=DD: lo más nuevo primero.
         params = {"keywords": query, "location": "Argentina", "geoId": ARGENTINA_GEO_ID,
-                  "f_TPR": LAST_24_HOURS, "start": page * PAGE_SIZE}
+                  "f_TPR": LAST_24_HOURS, "f_AL": "true", "sortBy": "DD", "start": page * PAGE_SIZE}
         found = parse_cards(_get(f"{SEARCH_URL}?{urlencode(params)}"))
+        log.info("Empleos '%s' página %d: %d avisos.", query, page + 1, len(found))
         cards += found
         if len(found) < PAGE_SIZE:
             break

@@ -19,6 +19,7 @@ PREVIOUS_CONTACT = "previo"
 JOBS_CSV = "empleos_linkedin.csv"
 # Emails a descartar a mano (uno por línea): se sacan de la cola sin frenar el loop.
 VETO_FILE = "descartar.txt"
+EASY_APPLY_SENT = "enviada"
 JOBS_CSV_HEADER = ("fecha", "puesto", "empresa", "ubicacion", "url", "solicitud_sencilla", "faltan")
 # Vacantes de recruiters sin email: Adriel les escribe por LinkedIn o completa el link que dejaron.
 LEADS_CSV = "contactar_linkedin.csv"
@@ -162,6 +163,15 @@ class Store:
                          (when.isoformat(timespec="seconds"), item.app.to, item.app.role,
                           item.app.subject, item.app.cv_path.name, item.post_url))
         return item
+
+    def easy_applies_on(self, day: date) -> int:
+        """Solicitudes sencillas enviadas ese día, según empleos_linkedin.csv."""
+        path = self.state_dir / JOBS_CSV
+        if not path.exists():
+            return 0
+        with path.open(newline="", encoding="utf-8") as fh:
+            return sum(1 for row in csv.DictReader(fh)
+                       if row["fecha"].startswith(day.isoformat()) and row["solicitud_sencilla"] == EASY_APPLY_SENT)
 
     def record_manual_job(self, row: tuple[str, ...]) -> None:
         """Aviso apto sin email: queda en la lista para postular desde LinkedIn."""

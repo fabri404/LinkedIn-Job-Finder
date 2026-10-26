@@ -1,9 +1,9 @@
-"""easy_apply.py - Completa la Solicitud sencilla de LinkedIn y la GUARDA sin enviarla.
+"""easy_apply.py - Completa la Solicitud sencilla de LinkedIn y la envía si quedó completa.
 
-Avanza página por página respondiendo solo lo que answers.py sabe con certeza. Se detiene
-ante la primera pregunta obligatoria sin respuesta o al llegar a "Enviar solicitud", y en
-ambos casos cierra el formulario eligiendo "Guardar": la solicitud queda en LinkedIn →
-Mis empleos → En curso, para que Adriel la revise y la envíe desde el celular.
+Avanza página por página respondiendo solo lo que answers.py sabe con certeza. Si llega a
+"Enviar solicitud" sin preguntas pendientes y `may_submit()` lo permite (cupo diario), la envía.
+Si queda una pregunta obligatoria sin respuesta, cierra el formulario eligiendo "Guardar": la
+solicitud queda en LinkedIn → Mis empleos → En curso, para que Adriel la complete a mano.
 """
 
 from __future__ import annotations
@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -20,8 +22,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import Select
 
-from answers import answer_for, pick_option
+from answers import CITY, answer_for, pick_option
 from feed import open_url
+from store import EASY_APPLY_SENT
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +38,17 @@ SUBMIT_TEXT = re.compile(r"^(enviar solicitud|submit application|enviar|submit)$
 # Solo la X del formulario: "Descartar empleo «…»" de la lista de recomendados oculta avisos.
 CLOSE_LABEL = re.compile(r"^(descartar|dismiss|cerrar|close)$", re.IGNORECASE)
 SAVE_TEXT = re.compile(r"^(guardar|save)$", re.IGNORECASE)
+SUBMITTED_TEXT = re.compile(
+    r"se envi[oó] tu solicitud|tu solicitud se envi[oó]|your application was sent|application submitted|"
+    r"solicitud enviada", re.IGNORECASE)
+PLACEHOLDER_OPTION = re.compile(r"^(select an option|selecciona(r)?( una)? opci[oó]n|seleccionar)$", re.IGNORECASE)
+CONSENT_LABEL = re.compile(
+    r"acepto|accept|agree|consent|consiento|t[eé]rminos|terms|privacidad|privacy|pol[ií]tica|declaro|certif",
+    re.IGNORECASE)
+CV_LABEL = re.compile(r"curr[ií]cul|resume|\bcv\b", re.IGNORECASE)
+READY = "guardada lista para enviar"
+SUBMITTED = EASY_APPLY_SENT
+START_WAIT_S = 12
 
 ROOT_JS = r"""
 const h = [...document.querySelectorAll('h1,h2,h3')].find(t => /^(Aplicar a|Apply to|Solicitar en)/i.test((t.innerText||'').trim()));
@@ -91,6 +105,19 @@ const h = [...document.querySelectorAll('h1,h2,h3')].find(t => /^(Aplicar a|Appl
 if (!h) return null;
 return h.closest('[role=dialog], [aria-modal=true], .artdeco-modal') || h.parentElement?.parentElement?.parentElement || null;
 """
+START_JS = r"""
+const re = new RegExp(arguments[0], 'i');
+return [...document.querySelectorAll('button, a')].find(b => re.test((b.innerText || '').trim())) || null;
+"""
+# Sugerencias del campo de ciudad: solo las de su propio listbox, no cualquier [role=option] de la página.
+TYPEAHEAD_JS = r"""
+const e = arguments[0];
+const id = e.getAttribute('aria-controls') || e.getAttribute('aria-owns');
+const box = id && document.getElementById(id);
+const option = box && box.querySelector('[role=option]');
+if (option) { option.click(); return true; }
+return false;
+"""
 PROGRESS_JS = "return (arguments[0].innerText.match(/\\d+\\/\\d+ p[aá]ginas|\\d+ ?%/) || [''])[0];"
 
 
@@ -100,17 +127,21 @@ class ApplyResult:
     missing: tuple[str, ...] = ()
 
 
+def _never_submit() -> bool:
+    return False
+
+
 class EasyApplyFiller:
-    """Completa y guarda una Solicitud sencilla. Nunca toca "Enviar solicitud"."""
+    """Completa una Solicitud sencilla; la envía solo si está completa y `may_submit()` lo permite."""
 
-    def __init__(self, driver: webdriver.Chrome) -> None:
+    def __init__(self, driver: webdriver.Chrome, may_submit: Callable[[], bool] = _never_submit) -> None:
         self.driver = driver
-        self.cv_name = ""
+        self.may_submit = may_submit
+        self.cv_path = Path()
 
-    def __call__(self, job_url: str, cv_name: str) -> ApplyResult:
-        self.cv_name = cv_name
+    def __call__(self, job_url: str, cv_path: str) -> ApplyResult:
+        self.cv_path = Path(cv_path)
         open_url(self.driver, job_url)
-        time.sleep(6)
         start = self._start_button()
         if isinstance(start, ApplyResult):
             return start
@@ -119,15 +150,20 @@ class EasyApplyFiller:
         if self._root() is None:
             return ApplyResult("formulario no encontrado")
         result = self._walk_pages()
+        if result.status == READY and self.may_submit():
+            return self._submit()
         saved = self._close_and_save()
         return result if saved else ApplyResult("no se pudo guardar", result.missing)
 
     def _start_button(self) -> WebElement | ApplyResult:
         # "Solicitud sencilla" es un botón; "Continuar" (solicitud ya guardada) es un enlace.
-        buttons = self.driver.find_elements(By.CSS_SELECTOR, "button, a")
-        easy = next((b for b in buttons if EASY_APPLY_TEXT.match((b.text or "").strip())), None)
-        if easy is not None:
-            return easy
+        # Se espera a que aparezca en vez de dormir un tiempo fijo: la página carga a ritmos muy distintos.
+        deadline = time.time() + START_WAIT_S
+        while time.time() < deadline:
+            easy = self.driver.execute_script(START_JS, EASY_APPLY_TEXT.pattern)
+            if easy is not None:
+                return easy
+            time.sleep(1)
         # Las tarjetas de "empleos similares" también dicen "Postulado": solo cuenta la página sin botón.
         page_text = self.driver.find_element(By.TAG_NAME, "main").text[:1500]
         return ApplyResult("ya postulado" if APPLIED_TEXT.search(page_text) else "sin solicitud sencilla")
@@ -147,7 +183,7 @@ class EasyApplyFiller:
             if button is None:
                 return ApplyResult("guardada incompleta", ("sin botón Siguiente",))
             if SUBMIT_TEXT.match(button.text.strip()):
-                return ApplyResult("guardada lista para enviar")
+                return ApplyResult(READY)
             if not self._advance(root, button):
                 return ApplyResult("guardada incompleta", ("LinkedIn marcó un error en la página",))
         return ApplyResult("guardada incompleta", ("demasiadas páginas",))
@@ -156,6 +192,7 @@ class EasyApplyFiller:
         missing = [label for el in root.find_elements(By.CSS_SELECTOR, FIELD_SELECTOR)
                    if (label := self._fill_field(el))]
         missing += self._fill_radio_groups(root)
+        missing += self._fill_checkboxes(root)
         return missing
 
     def _fill_field(self, el: WebElement) -> str | None:
@@ -169,12 +206,15 @@ class EasyApplyFiller:
         if el.tag_name == "select":
             return self._choose(el, label, answer)
         el.send_keys(answer if isinstance(answer, str) else answer[0])
-        self._accept_typeahead(el)
+        if answer == CITY:
+            self._accept_typeahead(el)
         return None
 
     def _has_value(self, el: WebElement) -> bool:
         if el.tag_name == "select":
-            return Select(el).first_selected_option.get_attribute("value") not in ("", "Select an option")
+            option = Select(el).first_selected_option
+            value = option.get_attribute("value") or ""
+            return value not in ("", "Select an option") and not PLACEHOLDER_OPTION.match(option.text.strip())
         return bool((el.get_attribute("value") or "").strip())
 
     @staticmethod
@@ -190,13 +230,33 @@ class EasyApplyFiller:
         return None
 
     def _accept_typeahead(self, el: WebElement) -> None:
-        """Los campos de ciudad muestran sugerencias: se elige la primera."""
+        """Los campos de ciudad muestran sugerencias: se elige la primera de su propia lista."""
         time.sleep(1.5)
-        options = self.driver.find_elements(By.CSS_SELECTOR, "[role=option]")
-        if options:
-            self.driver.execute_script("arguments[0].click()", options[0])
-        else:
+        if not self.driver.execute_script(TYPEAHEAD_JS, el):
             el.send_keys(Keys.TAB)
+
+    def _fill_checkboxes(self, root: WebElement) -> list[str]:
+        """Marca los de términos/privacidad; otro obligatorio sin marcar queda como faltante."""
+        missing = []
+        for box in root.find_elements(By.CSS_SELECTOR, "input[type=checkbox]"):
+            if box.is_selected():
+                continue
+            label = self.driver.execute_script(LABEL_JS, box)
+            if CONSENT_LABEL.search(label):
+                self.driver.execute_script("arguments[0].click()", box)
+            elif self._is_required(box, label):
+                missing.append(label)
+        return missing
+
+    def _upload_cv(self, root: WebElement) -> bool:
+        """El CV elegido no está entre los ya cargados: se sube al campo de currículum de la página."""
+        inputs = [el for el in root.find_elements(By.CSS_SELECTOR, "input[type=file]")
+                  if CV_LABEL.search(self.driver.execute_script(LABEL_JS, el) or "currículum")]
+        if not inputs or not self.cv_path.is_file():
+            return False
+        inputs[0].send_keys(str(self.cv_path.resolve()))
+        time.sleep(4)
+        return True
 
     def _fill_radio_groups(self, root: WebElement) -> list[str]:
         missing = []
@@ -204,6 +264,8 @@ class EasyApplyFiller:
             if group["checked"]:
                 continue
             index = self._radio_choice(group)
+            if index is None and self._is_cv_group(group) and self._upload_cv(root):
+                continue  # LinkedIn deja seleccionado el CV recién subido
             if index is None:
                 missing.append(group["legend"] or group["name"])
                 continue
@@ -211,9 +273,13 @@ class EasyApplyFiller:
             self.driver.execute_script("arguments[0].click()", radios[index])
         return missing
 
+    @staticmethod
+    def _is_cv_group(group: dict) -> bool:
+        return any(o.lower().endswith(".pdf") for o in group["options"])
+
     def _radio_choice(self, group: dict) -> int | None:
-        if any(o.lower().endswith(".pdf") for o in group["options"]):
-            return pick_option(group["options"], self.cv_name)
+        if self._is_cv_group(group):
+            return pick_option(group["options"], self.cv_path.name)
         answer = answer_for(group["legend"])
         return None if answer is None else pick_option(group["options"], answer)
 
@@ -232,6 +298,22 @@ class EasyApplyFiller:
         if new_root is None:
             return False
         return self.driver.execute_script(PROGRESS_JS, new_root) != before or new_root.text[:200] != heading
+
+    def _submit(self) -> ApplyResult:
+        """Clic en "Enviar solicitud" y confirma con el mensaje de LinkedIn. Si no se confirma y el
+        formulario sigue abierto, se guarda como antes para revisarlo a mano."""
+        root = self._root()
+        button = self._primary_button(root) if root is not None else None
+        if button is None or not SUBMIT_TEXT.match(button.text.strip()):
+            return ApplyResult(READY) if self._close_and_save() else ApplyResult("no se pudo guardar")
+        self.driver.execute_script("arguments[0].click()", button)
+        time.sleep(5)
+        page = self.driver.find_element(By.TAG_NAME, "body").text
+        if SUBMITTED_TEXT.search(page):
+            return ApplyResult(SUBMITTED)
+        if self._root() is not None and self._close_and_save():
+            return ApplyResult(READY, ("LinkedIn no confirmó el envío",))
+        return ApplyResult("envío sin confirmar")
 
     def _close_and_save(self) -> bool:
         modal = self.driver.execute_script(MODAL_JS)
@@ -252,9 +334,9 @@ class EasyApplyFiller:
         return True
 
 
-def safe_apply(filler: EasyApplyFiller, job_url: str, cv_name: str) -> ApplyResult:
+def safe_apply(filler: EasyApplyFiller, job_url: str, cv_path: str) -> ApplyResult:
     try:
-        return filler(job_url, cv_name)
+        return filler(job_url, cv_path)
     except WebDriverException as exc:
         log.warning("Solicitud sencilla: falló %s (%s).", job_url, exc.msg)
         return ApplyResult("error")

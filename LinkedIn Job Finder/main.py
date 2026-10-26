@@ -90,9 +90,18 @@ def _no_easy_apply(_driver: webdriver.Chrome | None) -> Applier:
     return lambda _url, _cv: ApplyResult("dry-run: sin solicitud sencilla")
 
 
-def _easy_apply(driver: webdriver.Chrome | None) -> Applier:
-    filler = EasyApplyFiller(driver)
-    return lambda url, cv_name: safe_apply(filler, url, cv_name)
+def easy_apply_factory(ctx: LoopContext) -> ApplierFactory:
+    """Solicitud sencilla que se envía sola mientras no se llegue a EASY_APPLY_DAILY_LIMIT en el día."""
+    limit = ctx.settings.run.easy_apply_daily_limit
+
+    def may_submit() -> bool:
+        return ctx.store.easy_applies_on(date.today()) < limit
+
+    def factory(driver: webdriver.Chrome | None) -> Applier:
+        filler = EasyApplyFiller(driver, may_submit)
+        return lambda url, cv_path: safe_apply(filler, url, cv_path)
+
+    return factory
 
 
 class LoopContext:
@@ -269,8 +278,8 @@ def process_job_card(card: JobCard, ctx: LoopContext) -> int:
         return 0
     if posting.emails:
         return _enqueue_posting(posting, card.url, ctx)
-    cv_name = select_cv(ctx.settings.mail.cv_dir, posting.track, posting.language).name
-    result = ctx.applier(card.url, cv_name)
+    cv_path = select_cv(ctx.settings.mail.cv_dir, posting.track, posting.language)
+    result = ctx.applier(card.url, str(cv_path))
     ctx.store.record_manual_job((datetime.now().isoformat(timespec="seconds"), card.title, card.company,
                                  card.location, card.url, result.status, "; ".join(result.missing)))
     log.info("EMPLEO → %s | %s | %s | %s", card.title, card.company, result.status, card.url)
@@ -282,6 +291,7 @@ def _evaluate_job_cards(cards: list[JobCard], ctx: LoopContext) -> int:
     found = details = 0
     for card in cards:
         if not is_profile_title(card.title):
+            log.info("desc empleo título fuera del perfil | %s | %s", card.title, card.company)
             ctx.store.mark_seen(card.key)
             continue
         if details == MAX_DETAILS_PER_CYCLE:
@@ -521,7 +531,7 @@ def main() -> None:
     setup_logging(settings)
     factory = build_sender_factory(settings, args.dry_run)
     ctx = LoopContext(settings, load_store(settings, args.dry_run), factory)
-    ctx.make_applier = _no_easy_apply if args.dry_run else _easy_apply
+    ctx.make_applier = _no_easy_apply if args.dry_run else easy_apply_factory(ctx)
     ctx.allow_follow = not args.dry_run
     log.info("Job Finder v3 | dry-run=%s | cupo diario %d | %d canales | %d en cola",
              args.dry_run, settings.run.daily_send_limit, len(ctx.channels), len(ctx.store.pending))

@@ -561,9 +561,18 @@ def _foreign_recruiter(emails: tuple[str, ...], text: str) -> bool:
     return all(email.endswith(FOREIGN_EMAIL_TLDS) for email in emails)
 
 
+# Títulos junior de IT que no dicen "desarrollador": "Trainee IT", "Pasante de Sistemas", "Soporte IT".
+IT_ENTRY_TITLE_PATTERN = re.compile(
+    r"analista de (sistemas|soporte)|soporte (it|ti|de sistemas)|test automation|automation (engineer|tester)|"
+    r"ingenier[oa] de datos|((trainee|pasant[eí]a?|j[oó]venes profesionales)\b.*\b(it|ti|sistemas|tecnolog[ií]a|"
+    r"software|desarrollo|programaci[oó]n|datos|qa|testing))|\b(it|sistemas)\b.*\b(trainee|pasant[eí]a?)",
+    re.IGNORECASE,
+)
+
+
 def is_profile_title(title: str) -> bool:
     """Prefiltro de avisos de la sección Empleos: puesto dev y nivel que no sea Senior/Lead."""
-    if not is_dev_title(title) or NON_DEV_ROLE_PATTERN.search(title):
+    if not (is_dev_title(title) or IT_ENTRY_TITLE_PATTERN.search(title)) or NON_DEV_ROLE_PATTERN.search(title):
         return False
     if ABOVE_LEVEL_TITLE_PATTERN.search(title) or OFF_PROFILE_TITLE_PATTERN.search(title):
         return False

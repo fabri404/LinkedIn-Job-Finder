@@ -1,4 +1,4 @@
-from answers import CITY, HEADLINE, answer_for, pick_option
+from answers import GITHUB_URL, LINKEDIN_URL, YES, CITY, HEADLINE, answer_for, pick_option
 
 
 def test_answer_for_headline_returns_profile_headline():
@@ -10,7 +10,7 @@ def test_answer_for_city_typeahead_returns_cordoba():
 
 
 def test_answer_for_years_with_core_stack_returns_one():
-    assert answer_for("¿Cuántos años de experiencia tienes con Python?") == "1"
+    assert answer_for("¿Cuántos años de experiencia tienes con Python?")[0] == "1"
 
 
 def test_answer_for_years_with_unknown_tech_returns_none():
@@ -38,7 +38,7 @@ def test_pick_option_falls_back_to_partial_match():
 
 
 def test_answer_for_software_development_years_returns_one():
-    assert answer_for("How many years of professional software development experience do you have?") == "1"
+    assert answer_for("How many years of professional software development experience do you have?")[0] == "1"
 
 
 def test_answer_for_usd_income_returns_900():
@@ -70,3 +70,33 @@ def test_answer_for_reviewed_conditions_with_compensation_returns_yes():
              "compensation), and job description, and are these aligned with your expectations?*")
 
     assert answer_for(label) == ("sí", "si", "yes")
+
+
+def test_answer_for_live_in_argentina_returns_yes():
+    assert answer_for("Do you live in Argentina?*") == YES
+
+
+def test_answer_for_profile_links_return_urls():
+    assert answer_for("LinkedIn Profile") == LINKEDIN_URL
+    assert answer_for("GitHub") == GITHUB_URL
+    assert answer_for("Website / portfolio") == GITHUB_URL
+
+
+def test_answer_for_yes_no_english_level_picks_yes_option():
+    assert pick_option(["Sí", "No"], answer_for("¿Tiene un nivel de inglés avanzado?*")) == 0
+
+
+def test_answer_for_at_least_three_years_yes_no_answers_no():
+    assert pick_option(["Sí", "No"], answer_for("¿Cuenta con al menos 3 años de experiencia en Python?")) == 1
+
+
+def test_answer_for_at_least_one_year_yes_no_answers_yes():
+    assert pick_option(["Yes", "No"], answer_for("Do you have at least 1 year of experience with Python?")) == 0
+
+
+def test_answer_for_sueldo_pretendido_is_salary():
+    assert answer_for("Por favor indicar sueldo pretendido") == "900"
+
+
+def test_answer_for_internet_connection_returns_yes():
+    assert answer_for("¿Contás con conexión a internet estable y espacio para trabajar?") == YES

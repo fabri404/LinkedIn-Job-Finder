@@ -11,6 +11,11 @@ from dataclasses import dataclass
 
 HEADLINE = "Backend Developer | Python · FastAPI · PostgreSQL | Testing & QA"
 CITY = "Córdoba, Córdoba, Argentina"
+LINKEDIN_URL = "https://www.linkedin.com/in/adriel-lopez"
+GITHUB_URL = "https://github.com/fabri404"
+# Años de experiencia con su stack (SE-AR Manager y cursos): una pregunta "¿al menos N años?" con
+# N mayor se contesta que no.
+STACK_YEARS = 1
 COVER_LETTER = (
     "Hola, me postulo a esta búsqueda. Creé y desarrollo SE-AR Manager, un SaaS multi-tenant en "
     "Python/FastAPI, PostgreSQL y Flutter que usan negocios reales, con más de 2.300 tests y CI/CD. "
@@ -38,6 +43,10 @@ def _rule(pattern: str, answer: str | tuple[str, ...]) -> Rule:
 
 RULES: tuple[Rule, ...] = (
     _rule(r"headline|titular", HEADLINE),
+    _rule(r"github", GITHUB_URL),
+    _rule(r"linkedin", LINKEDIN_URL),
+    _rule(r"portfolio|portafolio|website|sitio web|p[aá]gina web|personal site", GITHUB_URL),
+    _rule(r"(live|living|based|located|resid|viv[ií]s|vives|vive).*argentin|argentin.*(resid|based)", YES),
     _rule(r"cover letter|carta de presentaci", COVER_LETTER),
     _rule(r"location \(city\)|ciudad|city", CITY),
     _rule(r"(authori[sz]ed|autorizad|derecho).*(work|trabajar).*argentin|legally.*argentin", YES),
@@ -45,14 +54,14 @@ RULES: tuple[Rule, ...] = (
     _rule(r"remot|home office", YES),
     _rule(r"(h[ií]brid|presencial|on-?site|oficina).*c[oó]rdoba|c[oó]rdoba.*(h[ií]brid|presencial|oficina)", YES),
     _rule(r"(english|ingl[eé]s).*(level|nivel|proficien|dominio)|(level|nivel).*(english|ingl[eé]s)",
-          ("c1", "advanced", "avanzado", "profesional", "professional", "fluent")),
+          ("c1", "advanced", "avanzado", "profesional", "professional", "fluent", *YES)),
     # Pretensión ya usada en sus postulaciones (USD 900/mes); en pesos no se responde.
     _rule(r"^(?!.*(\bars\b|pesos|reviewed|aligned|revisaste|de acuerdo)).*"
-          r"(salary|salario|pretensi|expected .*income|remuneraci|compensation)", "900"),
+          r"(salary|salario|pretensi|pretendid|sueldo|expected .*income|remuneraci|compensation)", "900"),
     _rule(r"start date|fecha de inicio|cu[aá]ndo (pod|pued)|notice period|preaviso|"
           r"disponibilidad (para (empezar|comenzar|incorporarte)|de inicio)", "Inmediata"),
 )
-YEARS_QUESTION = re.compile(r"(years|años).*(experien)|(experien).*(years|años)", re.IGNORECASE)
+YEARS_QUESTION = re.compile(r"\b(years?|años?)\b.*(experien)|(experien).*\b(years?|años?)\b", re.IGNORECASE)
 EXPERIENCE_QUESTION = re.compile(r"experien|hands-on|have you (used|worked)|ten[eé]s conocimiento|conocimientos? (de|en)",
                                  re.IGNORECASE)
 # Tecnologías que no están en su perfil: esas preguntas las contesta Adriel ("API Gateway" de AWS no es su API).
@@ -64,15 +73,19 @@ OTHER_STACK = re.compile(
 PRODUCTION_WORK = re.compile(r"debug|troubleshoot|producci[oó]n|production|database|bases? de datos", re.IGNORECASE)
 WILLINGNESS = re.compile(
     r"willing|dispuest[oa]|background check|antecedentes|reviewed .*requirements|aligned with your expectations|"
-    r"available|disponib|comfortable to work|home office setup|stable internet|conexi[oó]n estable",
+    r"available|disponib|comfortable to work|home office setup|stable internet|conexi[oó]n (a internet )?estable|"
+    r"conexi[oó]n a internet",
     re.IGNORECASE,
 )
+
+
+MIN_YEARS = re.compile(r"(\d+)\s*\+?\s*(años?|years?|yrs?)\b", re.IGNORECASE)
 
 
 def answer_for(label: str) -> str | tuple[str, ...] | None:
     """Respuesta para la pregunta `label`; None si no hay un dato verificado para darla."""
     if YEARS_QUESTION.search(label):
-        return "1" if CORE_STACK.search(label) and not OTHER_STACK.search(label) else None
+        return _years_answer(label)
     rule = next((rule.answer for rule in RULES if rule.pattern.search(label)), None)
     if rule is not None:
         return rule
@@ -80,6 +93,15 @@ def answer_for(label: str) -> str | tuple[str, ...] | None:
         known = (CORE_STACK.search(label) or PRODUCTION_WORK.search(label)) and not OTHER_STACK.search(label)
         return YES if known else None
     return YES if WILLINGNESS.search(label) else None
+
+
+def _years_answer(label: str) -> tuple[str, ...] | None:
+    """"1" para un campo numérico; para Sí/No ("¿al menos 3 años con Python?"), sí solo si llega."""
+    if not CORE_STACK.search(label) or OTHER_STACK.search(label):
+        return None
+    asked = MIN_YEARS.search(label)
+    meets = asked is None or int(asked.group(1)) <= STACK_YEARS
+    return (str(STACK_YEARS), *(YES if meets else NO))
 
 
 def pick_option(options: list[str], answer: str | tuple[str, ...]) -> int | None:

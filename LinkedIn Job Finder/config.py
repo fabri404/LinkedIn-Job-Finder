@@ -32,6 +32,8 @@ class RunSettings:
     daily_send_limit: int
     send_delay_min_s: int
     send_delay_max_s: int
+    # Solicitudes sencillas que se envían solas por día (0 = solo guardarlas, nunca enviar).
+    easy_apply_daily_limit: int = 25
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ def load_settings() -> Settings:
         daily_send_limit=_env_int("DAILY_SEND_LIMIT", 100),
         send_delay_min_s=_env_int("SEND_DELAY_MIN_S", 5),
         send_delay_max_s=_env_int("SEND_DELAY_MAX_S", 15),
+        easy_apply_daily_limit=_env_int("EASY_APPLY_DAILY_LIMIT", 25),
     )
     mail = MailSettings(cv_dir=_env_path("CV_DIR", DEFAULT_CV_DIR))
     return Settings(
