@@ -82,15 +82,33 @@ Editá el archivo `.env` con tus credenciales de LinkedIn.
 
 ## Uso
 
+### Dashboard (sin terminal)
+
+Abrí **LinkedIn Job Finder** desde el menú de aplicaciones, o corré:
+
 ```bash
-python main.py
+python3 dashboard.py --open   # http://localhost:8765
 ```
 
-El script te va a pedir cuántos segundos querés que scrollee el feed. Valores recomendados:
+| Botón | Qué hace |
+|---|---|
+| Iniciar loop | Corre 24/7 sin ventana (feed, grupos, búsquedas de publicaciones y Empleos) |
+| Correr una vuelta | Una sola vuelta y termina |
+| Con ventana (login) | Abre Chrome visible para iniciar sesión o resolver una verificación de LinkedIn |
+| Detener | Cierra Chrome y guarda el estado |
 
-- **30 segundos**: búsqueda rápida.
-- **60 segundos**: búsqueda estándar.
-- **120+ segundos**: búsqueda profunda, más publicaciones cargadas.
+Pestañas: borradores creados, empleos sin email (Easy Apply guardado o postulación manual),
+vacantes para contactar por LinkedIn, búsquedas de publicaciones (agregar/quitar; se aplican
+al reiniciar el loop) y actividad reciente. Solo escucha en `127.0.0.1` y nunca envía mails:
+los borradores quedan en Gmail.
+
+### Terminal
+
+```bash
+python3 main.py            # loop continuo
+python3 main.py --once     # una vuelta
+python3 main.py --dry-run  # arma los mails sin crear borradores
+```
 
 ## Personalización
 

@@ -1,0 +1,11 @@
+# Búsquedas en LinkedIn → Empleos (Argentina, últimas 24 h). Una por línea.
+python
+backend
+desarrollador
+developer
+full stack
+qa
+tester
+qa automation
+devops
+soporte técnico

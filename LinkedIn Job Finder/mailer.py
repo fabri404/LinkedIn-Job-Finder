@@ -1,96 +1,149 @@
+"""mailer.py - Deja cada postulación como borrador en Gmail, con el CV adjunto.
+
+Usa la sesión de Gmail del mismo perfil de Chrome del loop: no guarda contraseñas.
+El envío final lo hace el usuario desde la carpeta Borradores.
 """
-mailer.py - Envío de emails con CV adjunto vía Gmail SMTP.
+
+from __future__ import annotations
+
+import logging
+import time
+from urllib.parse import quote, urlencode
+
+from selenium import webdriver
+from selenium.common.exceptions import UnexpectedAlertPresentException, WebDriverException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+
+from composer import Application
+from feed import hide_headless_user_agent, open_url
+
+log = logging.getLogger(__name__)
+
+GMAIL_INBOX_URL = "https://mail.google.com/mail/u/0/#inbox"
+GMAIL_COMPOSE_URL = "https://mail.google.com/mail/u/0/"
+FILE_INPUT = "input[type=file][name=Filedata]"
+UPLOAD_PROGRESS = "[role=progressbar]"
+LOAD_TIMEOUT_S = 30
+UPLOAD_TIMEOUT_S = 90
+SAVE_TIMEOUT_S = 30
+AUTOSAVE_WAIT_S = 4
+# Gmail guarda solo el borrador y lo indica con "Guardado" ("Saved" con la UI en inglés).
+SAVED_JS = """
+return [...document.querySelectorAll('span, div')].some(e =>
+  e.children.length === 0 && ['Guardado', 'Saved'].includes((e.innerText || '').trim()));
 """
 
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-from pathlib import Path
 
-from config import GMAIL_USER, GMAIL_APP_PASSWORD, CV_PATH, TEMPLATE_ES, TEMPLATE_EN
+class MailError(Exception):
+    """Fallo al crear el borrador. `permanent` indica que reintentar no sirve."""
 
-
-SUBJECTS = {
-    "es": "Desarrollador Backend Junior - Adriel Fabricio López",
-    "en": "Junior Backend Developer - Adriel Fabricio López",
-}
+    def __init__(self, message: str, permanent: bool = False) -> None:
+        super().__init__(message)
+        self.permanent = permanent
 
 
-def load_template(language: str) -> str:
-    """Carga la plantilla de email según el idioma."""
-    template_path = TEMPLATE_ES if language == "es" else TEMPLATE_EN
-    if not template_path.exists():
-        raise FileNotFoundError(f"No se encontró la plantilla: {template_path}")
-
-    with open(template_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    # Saltar la primera línea (es el asunto dentro del archivo)
-    lines = content.split("\n")
-    body_start = next(
-        (i for i, line in enumerate(lines) if line.strip() == ""),
-        1,
-    )
-    return "\n".join(lines[body_start:]).strip()
+class AuthError(MailError):
+    """No hay sesión de Gmail en el perfil de Chrome: hay que frenar."""
 
 
-def build_message(to_email: str, language: str) -> MIMEMultipart:
-    """Construye el mensaje MIME con cuerpo + CV adjunto."""
-    msg = MIMEMultipart()
-    msg["From"] = GMAIL_USER
-    msg["To"] = to_email
-    msg["Subject"] = SUBJECTS.get(language, SUBJECTS["es"])
-
-    # Cuerpo del email
-    body = load_template(language)
-    msg.attach(MIMEText(body, "plain", "utf-8"))
-
-    # Adjuntar CV
-    cv_path = Path(CV_PATH)
-    if cv_path.exists():
-        with open(cv_path, "rb") as f:
-            attachment = MIMEApplication(f.read(), _subtype="pdf")
-            attachment.add_header(
-                "Content-Disposition",
-                "attachment",
-                filename="CV_Adriel_Fabricio_Lopez.pdf",
-            )
-            msg.attach(attachment)
-    else:
-        print(f"  [WARN] CV no encontrado en {CV_PATH}, se enviará sin adjunto.")
-
-    return msg
+def compose_url(app: Application) -> str:
+    params = {"view": "cm", "fs": "1", "to": app.to, "su": app.subject, "body": app.body}
+    return f"{GMAIL_COMPOSE_URL}?{urlencode(params, quote_via=quote)}"
 
 
-def send_email(to_email: str, language: str) -> bool:
-    """
-    Envía un email a un destinatario con el CV adjunto.
-    Retorna True si se envió correctamente, False en caso de error.
-    """
+GMAIL_PREFIX = "https://mail.google.com/mail"
+GOOGLE_LOGIN_PREFIX = "https://accounts.google.com"
+
+
+def is_gmail_logged_in(driver: webdriver.Chrome) -> bool:
+    return driver.current_url.startswith(GMAIL_PREFIX)
+
+
+def _landed_url(driver: webdriver.Chrome) -> str:
+    """Espera a que la navegación llegue a Gmail o al login de Google; devuelve la URL final."""
     try:
-        msg = build_message(to_email, language)
+        WebDriverWait(driver, LOAD_TIMEOUT_S).until(
+            lambda d: d.current_url.startswith((GMAIL_PREFIX, GOOGLE_LOGIN_PREFIX)))
+    except WebDriverException:
+        pass  # sigue con la URL que haya: el llamador decide si es error pasajero
+    return driver.current_url
 
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            server.send_message(msg)
 
-        print(f"  [OK] Email enviado a: {to_email} ({language.upper()})")
+def wait_for_gmail_login(driver: webdriver.Chrome, timeout_s: int = 900) -> bool:
+    """Abre Gmail en una pestaña aparte y espera a que el usuario inicie sesión (una sola vez)."""
+    main_tab = driver.current_window_handle
+    driver.switch_to.new_window("tab")
+    try:
+        hide_headless_user_agent(driver)
+        open_url(driver, GMAIL_INBOX_URL)
+        deadline = time.time() + timeout_s
+        if not is_gmail_logged_in(driver):
+            log.warning("Iniciá sesión en Gmail en la pestaña que abrió el loop (una sola vez).")
+        while not is_gmail_logged_in(driver):
+            if time.time() > deadline:
+                return False
+            time.sleep(5)
         return True
+    finally:
+        driver.close()
+        driver.switch_to.window(main_tab)
 
-    except smtplib.SMTPAuthenticationError:
-        print(
-            "  [ERROR] Falló la autenticación de Gmail.\n"
-            "  Verificá que GMAIL_APP_PASSWORD sea una contraseña de aplicación válida.\n"
-            "  Generala en: https://myaccount.google.com/apppasswords"
-        )
-        return False
 
-    except smtplib.SMTPRecipientsRefused:
-        print(f"  [ERROR] Destinatario rechazado: {to_email}")
-        return False
+class GmailDraftWriter:
+    """Sender que crea un borrador por postulación en una pestaña temporal.
 
-    except Exception as e:
-        print(f"  [ERROR] No se pudo enviar a {to_email}: {e}")
-        return False
+    Gmail guarda el borrador apenas se abre la redacción: un fallo después de abrirla es
+    permanente (no se reintenta) para no duplicar borradores.
+    """
+
+    def __init__(self, driver: webdriver.Chrome) -> None:
+        self.driver = driver
+
+    def __call__(self, app: Application) -> None:
+        if not app.cv_path.is_file():
+            raise MailError(f"CV no encontrado: {app.cv_path}", permanent=True)
+        main_tab = self.driver.current_window_handle
+        self.driver.switch_to.new_window("tab")
+        try:
+            hide_headless_user_agent(self.driver)
+            self._open_compose(app)
+            self._attach_and_save(app)
+        finally:
+            self._close_tab(main_tab)
+
+    def _open_compose(self, app: Application) -> None:
+        try:
+            open_url(self.driver, compose_url(app))
+            url = _landed_url(self.driver)
+            if url.startswith(GOOGLE_LOGIN_PREFIX):
+                raise AuthError("No hay sesión de Gmail en el Chrome del loop")
+            if not url.startswith(GMAIL_PREFIX):
+                raise MailError(f"Gmail no cargó a tiempo para {app.to}")
+            WebDriverWait(self.driver, LOAD_TIMEOUT_S).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, FILE_INPUT))
+        except WebDriverException as exc:
+            raise MailError(f"Gmail no abrió la redacción para {app.to}: {exc.msg}") from exc
+
+    def _attach_and_save(self, app: Application) -> None:
+        try:
+            self.driver.find_element(By.CSS_SELECTOR, FILE_INPUT).send_keys(str(app.cv_path))
+            WebDriverWait(self.driver, UPLOAD_TIMEOUT_S).until(lambda d: self._upload_done(app))
+            time.sleep(AUTOSAVE_WAIT_S)
+            WebDriverWait(self.driver, SAVE_TIMEOUT_S).until(lambda d: d.execute_script(SAVED_JS))
+        except WebDriverException as exc:
+            raise MailError(f"borrador para {app.to} quizá incompleto (revisalo en Gmail): {exc.msg}",
+                            permanent=True) from exc
+
+    def _upload_done(self, app: Application) -> bool:
+        body_text = self.driver.find_element(By.TAG_NAME, "body").text
+        uploading = self.driver.find_elements(By.CSS_SELECTOR, UPLOAD_PROGRESS)
+        return app.cv_path.name in body_text and not uploading
+
+    def _close_tab(self, main_tab: str) -> None:
+        try:
+            self.driver.close()
+        except UnexpectedAlertPresentException:
+            self.driver.switch_to.alert.accept()
+        finally:
+            self.driver.switch_to.window(main_tab)

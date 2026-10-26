@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Finder</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+    --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --chip: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11141a; --panel: #1a1f28; --text: #e6e9ef; --muted: #9aa3b2; --border: #2a3140;
+      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --chip: #1e2a44;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
+  .state { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+           padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  .alert { margin-top: 14px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn);
+           color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0; }
+  .kpi, .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .kpi { padding: 12px 14px; }
+  .kpi b { display: block; font-size: 22px; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  .info { color: var(--muted); font-size: 13px; display: grid; gap: 2px; margin-bottom: 12px; overflow-wrap: anywhere; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .tab { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .panel { padding: 12px; margin-top: 12px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.wrap { overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .lvl-ERROR, .lvl-CRITICAL { color: var(--bad); }
+  .lvl-WARNING { color: var(--warn); }
+  form { display: flex; gap: 8px; margin-bottom: 10px; }
+  input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+          background: var(--bg); color: var(--text); min-width: 0; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--chip); border-radius: 999px;
+          padding: 4px 6px 4px 10px; margin: 3px; }
+  .chip button { padding: 0 6px; border: none; background: none; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .empty { color: var(--muted); padding: 8px; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>LinkedIn Job Finder</h1>
+      <span class="state"><span id="dot" class="dot"></span><span id="state">Cargando…</span></span>
+    </div>
+    <div class="actions">
+      <button class="primary" id="btn-start" data-mode="loop">Iniciar loop</button>
+      <button id="btn-once" data-mode="once">Correr una vuelta</button>
+      <button id="btn-visible" data-mode="visible" title="Abre Chrome con ventana para iniciar sesión o resolver una verificación">Con ventana (login)</button>
+      <button class="danger" id="btn-stop">Detener</button>
+    </div>
+  </header>
+  <div id="alert" class="alert" hidden></div>
+
+  <section class="kpis">
+    <div class="kpi"><b id="k-today">–</b><span>borradores hoy</span></div>
+    <div class="kpi"><b id="k-pending">–</b><span>en cola</span></div>
+    <div class="kpi"><b id="k-searches">–</b><span>búsquedas de publicaciones</span></div>
+    <div class="kpi"><b id="k-sources">–</b><span>grupos y páginas</span></div>
+  </section>
+  <div class="info">
+    <div>Leyendo: <span id="i-source">–</span></div>
+    <div>Última vuelta: <span id="i-cycle">–</span></div>
+    <div>Último error: <span id="i-error">–</span></div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="drafts">Borradores</button>
+    <button class="tab" data-tab="jobs">Empleos sin email</button>
+    <button class="tab" data-tab="leads">Contactar por LinkedIn</button>
+    <button class="tab" data-tab="searches">Búsquedas</button>
+    <button class="tab" data-tab="log">Actividad</button>
+  </nav>
+  <section class="panel" id="panel"></section>
+</main>
+<div id="toast"></div>
+
+<script>
+const HEADERS = { "Content-Type": "application/json", "X-Job-Finder": "1" };
+const TABS = {
+  drafts: { url: "/api/drafts", cols: [["fecha", "Fecha"], ["email", "Para"], ["puesto", "Puesto"], ["cv", "CV"]],
+            empty: "Todavía no hay borradores." },
+  jobs: { url: "/api/jobs", cols: [["fecha", "Fecha"], ["puesto", "Puesto"], ["empresa", "Empresa"],
+          ["solicitud_sencilla", "Estado"], ["url", "Aviso"]], empty: "No hay empleos pendientes." },
+  leads: { url: "/api/leads", cols: [["fecha", "Fecha"], ["recruiter", "Recruiter"], ["puesto", "Puesto"],
+           ["perfil", "Perfil"], ["mensaje", "Mensaje sugerido"]], empty: "No hay vacantes para contactar por LinkedIn." },
+};
+let currentTab = "drafts";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const shortDate = (iso) => iso.replace(/^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d).*$/, "$2/$1 $3");
+const cell = (value, key) => {
+  if (/^https?:\/\//.test(value || "")) return `<a href="${esc(value)}" target="_blank" rel="noopener">abrir</a>`;
+  return esc(key === "fecha" ? shortDate(value || "") : value);
+};
+
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3500);
+}
+
+async function api(method, url, body) {
+  const res = await fetch(url, { method, headers: HEADERS, body: body ? JSON.stringify(body) : undefined });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || res.statusText);
+  return payload;
+}
+
+async function refreshStatus() {
+  const s = await api("GET", "/api/status");
+  $("dot").classList.toggle("on", s.running);
+  $("state").textContent = s.running ? `Corriendo desde ${s.started_at ?? "–"}` : "Detenido";
+  $("btn-start").disabled = $("btn-once").disabled = $("btn-visible").disabled = s.running;
+  $("btn-stop").disabled = !s.running;
+  $("k-today").textContent = s.drafts_today;
+  $("k-pending").textContent = s.pending;
+  $("k-searches").textContent = s.searches;
+  $("k-sources").textContent = s.other_sources;
+  $("i-source").textContent = s.running ? (s.current_source ?? "arrancando…") : "–";
+  $("i-cycle").textContent = s.last_cycle ?? "ninguna completa desde el último inicio";
+  $("i-error").textContent = s.last_error ?? "ninguno";
+  $("alert").hidden = !s.alert;
+  $("alert").textContent = s.alert
+    ? `LinkedIn pide atención: ${s.alert}. Usá "Con ventana (login)" y resolvelo en Chrome.` : "";
+}
+
+function renderTable(rows, tab) {
+  if (!rows.length) return `<div class="empty">${tab.empty}</div>`;
+  const head = tab.cols.map(([, label]) => `<th>${label}</th>`).join("");
+  const body = rows.map((r) => `<tr>${tab.cols.map(([key]) => `<td class="wrap">${cell(r[key], key)}</td>`).join("")}</tr>`).join("");
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+async function renderSearches() {
+  const list = await api("GET", "/api/searches");
+  const chips = list.map((q) => `<span class="chip">${esc(q)}<button data-remove="${esc(q)}" title="Quitar">✕</button></span>`).join("");
+  $("panel").innerHTML = `
+    <form id="add-form"><input id="q" maxlength="120" placeholder='Ej.: "enviar cv" desarrollador python' required>
+    <button class="primary">Agregar</button></form>
+    <div>${chips || '<div class="empty">Sin búsquedas.</div>'}</div>
+    <p class="note">Busca publicaciones de la última semana. Los cambios se aplican al reiniciar el loop.</p>`;
+  $("add-form").onsubmit = async (e) => {
+    e.preventDefault();
+    await run(() => api("POST", "/api/searches", { query: $("q").value }), "Búsqueda agregada.");
+    renderSearches();
+  };
+  $("panel").querySelectorAll("[data-remove]").forEach((b) => b.onclick = async () => {
+    await run(() => api("DELETE", "/api/searches", { query: b.dataset.remove }), "Búsqueda quitada.");
+    renderSearches();
+  });
+}
+
+async function renderLog() {
+  const rows = await api("GET", "/api/log?limit=150");
+  $("panel").innerHTML = rows.length ? `<table><tbody>${rows.map((r) =>
+    `<tr><td>${esc(r.ts)}</td><td class="wrap lvl-${esc(r.level)}">${esc(r.msg)}</td></tr>`).join("")}</tbody></table>`
+    : '<div class="empty">Sin actividad.</div>';
+}
+
+async function refreshPanel() {
+  if (currentTab === "searches") return;  // se redibuja solo al editar, para no borrar lo que se está escribiendo
+  if (currentTab === "log") return renderLog();
+  const tab = TABS[currentTab];
+  $("panel").innerHTML = renderTable(await api("GET", `${tab.url}?limit=100`), tab);
+}
+
+async function run(action, okMessage) {
+  try { await action(); toast(okMessage); } catch (err) { toast(err.message); }
+  refreshStatus().catch(() => {});
+}
+
+document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () =>
+  run(() => api("POST", "/api/loop/start", { mode: b.dataset.mode }), "Loop iniciado."));
+$("btn-stop").onclick = () => { toast("Deteniendo… (cierra Chrome y guarda el estado)");
+  run(() => api("POST", "/api/loop/stop", {}), "Loop detenido."); };
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+  currentTab = t.dataset.tab;
+  (currentTab === "searches" ? renderSearches() : refreshPanel()).catch((e) => toast(e.message));
+});
+
+async function tick() {
+  try { await refreshStatus(); await refreshPanel(); } catch (err) { $("state").textContent = "Sin conexión con el dashboard"; }
+}
+tick();
+setInterval(tick, 5000);
+</script>
+</body>
+</html>
