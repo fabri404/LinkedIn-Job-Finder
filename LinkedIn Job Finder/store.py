@@ -49,6 +49,8 @@ class Store:
     pending: list[QueuedApplication] = field(default_factory=list)
     profile_visits: dict[str, int] = field(default_factory=dict)
     search_pages: dict[str, int] = field(default_factory=dict)
+    # Fuente por la que sigue la vuelta y vuelta de rotación: sobreviven a un reinicio.
+    progress: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def load(cls, state_dir: Path) -> Store:
@@ -59,7 +61,8 @@ class Store:
         data = json.loads(path.read_text(encoding="utf-8"))
         pending = [QueuedApplication.from_dict(item) for item in data.get("pending", [])]
         return cls(state_dir, set(data.get("seen", [])), dict(data.get("contacted", {})), pending,
-                   dict(data.get("profile_visits", {})), dict(data.get("search_pages", {})))
+                   dict(data.get("profile_visits", {})), dict(data.get("search_pages", {})),
+                   dict(data.get("progress", {})))
 
     def save(self) -> None:
         data = {
@@ -68,6 +71,7 @@ class Store:
             "pending": [item.to_dict() for item in self.pending],
             "profile_visits": self.profile_visits,
             "search_pages": self.search_pages,
+            "progress": self.progress,
         }
         tmp = self.state_dir / f"{STATE_FILE}.tmp"
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")

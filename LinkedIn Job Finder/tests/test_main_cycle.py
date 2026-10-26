@@ -1,17 +1,29 @@
 from types import SimpleNamespace
 
 import main
+from sources import Source
 
 
-def _ctx(channels: list[str]) -> SimpleNamespace:
+def _ctx(channels: list[str], progress: dict[str, int] | None = None) -> SimpleNamespace:
     run = SimpleNamespace(scroll_minutes=4, channel_scroll_minutes=1)
-    return SimpleNamespace(settings=SimpleNamespace(run=run), channels=channels, source_cursor=0, current_source=0)
+    store = SimpleNamespace(progress=progress if progress is not None else {}, is_seen=lambda _key: False)
+    return SimpleNamespace(settings=SimpleNamespace(run=run), channels=channels, store=store, current_source=0)
+
+
+def _fake_harvest(monkeypatch, visited: list[str]) -> None:
+    def harvest(_driver, source: Source, _is_seen):
+        visited.append(source.url)
+        return [source.url]
+
+    monkeypatch.setattr(main, "safe_harvest", harvest)
 
 
 def test_harvest_sources_drains_right_after_each_source_with_new_posts(monkeypatch):
     # Arrange
-    queued_by_url = {main.FEED_URL: 0, "canal-a": 2, "canal-b": 0, "canal-c": 1}
-    monkeypatch.setattr(main, "safe_harvest", lambda _d, url, _m: [url])
+    visited: list[str] = []
+    _fake_harvest(monkeypatch, visited)
+    queued_by_url = {main.plan_sources([], SimpleNamespace(scroll_minutes=4, channel_scroll_minutes=1), 0)[0].url: 0,
+                     "canal-a": 2, "canal-b": 0, "canal-c": 1}
     monkeypatch.setattr(main, "enqueue_new_posts", lambda posts, _ctx: queued_by_url[posts[0]])
     drained_after: list[int] = []
     ctx = _ctx(["canal-a", "canal-b", "canal-c"])
@@ -25,4 +37,36 @@ def test_harvest_sources_drains_right_after_each_source_with_new_posts(monkeypat
 
     # Assert
     assert (read, queued, sent) == (4, 3, 2)
-    assert drained_after == [1, 3]
+    assert drained_after == [0, 2]
+
+
+def test_harvest_sources_runs_content_searches_before_pages_and_feed(monkeypatch):
+    # Arrange
+    visited: list[str] = []
+    _fake_harvest(monkeypatch, visited)
+    monkeypatch.setattr(main, "enqueue_new_posts", lambda _posts, _ctx: 0)
+    search = "https://www.linkedin.com/search/results/content/?keywords=cv"
+    ctx = _ctx(["https://www.linkedin.com/groups/1/", search])
+
+    # Act
+    main.harvest_sources(None, ctx, lambda: 0)
+
+    # Assert
+    assert visited[0] == search
+    assert visited[-1] == "https://www.linkedin.com/feed/"
+
+
+def test_harvest_sources_resumes_from_persisted_cursor_and_advances_rotation(monkeypatch):
+    # Arrange
+    visited: list[str] = []
+    _fake_harvest(monkeypatch, visited)
+    monkeypatch.setattr(main, "enqueue_new_posts", lambda _posts, _ctx: 0)
+    progress = {main.CURSOR_KEY: 1, main.ROTATION_KEY: 4}
+    ctx = _ctx(["canal-a", "canal-b"], progress)
+
+    # Act
+    main.harvest_sources(None, ctx, lambda: 0)
+
+    # Assert
+    assert visited == ["canal-b", "https://www.linkedin.com/feed/", "canal-a"]
+    assert progress == {main.CURSOR_KEY: 0, main.ROTATION_KEY: 5}

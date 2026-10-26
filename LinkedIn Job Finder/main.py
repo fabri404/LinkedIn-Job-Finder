@@ -40,7 +40,7 @@ from config import (
     validate_mail_settings,
 )
 from easy_apply import ApplyResult, EasyApplyFiller, safe_apply
-from feed import FEED_URL, FeedPost, create_driver, safe_harvest, wait_for_login
+from feed import FeedPost, create_driver, safe_harvest, wait_for_login
 from jobs import FETCH_ERRORS as JOB_FETCH_ERRORS
 from jobs import (
     COOLDOWN_AFTER_429_S,
@@ -70,13 +70,14 @@ from recruiters import (
     recruiter_pause,
     safe_search,
 )
+from sources import plan_sources
 from store import VETO_FILE, QueuedApplication, Store
 
 log = logging.getLogger("job_finder")
 PREVIOUS_CONTACTS_FILE = BASE_DIR / "contactados_previos.txt"
 CHECKPOINT_PATH = "/checkpoint/"
-# El DOM del feed crece varios GB al scrollear: se lee en tramos y se suelta entre uno y otro.
-FEED_SEGMENT_MINUTES = 4
+CURSOR_KEY = "source_cursor"
+ROTATION_KEY = "source_rotation"
 
 Sender = Callable[[Application], None]
 SenderFactory = Callable[[webdriver.Chrome], Sender]
@@ -105,7 +106,6 @@ class LoopContext:
         self.job_queries = load_channels(settings.job_queries_file)
         self.job_cycle = 0
         self.jobs_paused_until = 0.0
-        self.source_cursor = 0
         self.current_source = 0
         self.recruiter_queries = load_channels(settings.recruiter_queries_file)
         self.recruiter_cycle = 0
@@ -187,26 +187,25 @@ def drain_queue(store: Store, run: RunSettings, sender: Sender) -> int:
 
 
 def harvest_sources(driver: webdriver.Chrome, ctx: LoopContext, drain: Callable[[], int]) -> tuple[int, int, int]:
-    """Feed principal (en tramos) y después cada canal; devuelve (posts leídos, nuevos en cola, borradores).
+    """Recorre las fuentes de la vuelta (`plan_sources`); devuelve (posts leídos, nuevos en cola, borradores).
 
-    Lo encolado en cada fuente pasa a Gmail enseguida (`drain`): la vuelta tarda horas y
-    un cuelgue o una suspensión la cortan antes del final.
+    Lo encolado en cada fuente pasa a Gmail enseguida (`drain`). La fuente por la que va la vuelta
+    queda en el estado: un cuelgue o un reinicio retoman desde ahí en vez de volver a empezar.
     """
-    run = ctx.settings.run
-    feed_segments = max(1, round(run.scroll_minutes / FEED_SEGMENT_MINUTES))
-    sources = [(FEED_URL, run.scroll_minutes / feed_segments)] * feed_segments
-    sources += [(channel, run.channel_scroll_minutes) for channel in ctx.channels]
+    progress = ctx.store.progress
+    sources = plan_sources(ctx.channels, ctx.settings.run, progress.get(ROTATION_KEY, 0))
     read = queued = sent = 0
-    for index in sources_from_cursor(len(sources), ctx.source_cursor):
+    for index in sources_from_cursor(len(sources), progress.get(CURSOR_KEY, 0)):
         ctx.current_source = index
-        url, minutes = sources[index]
-        posts = safe_harvest(driver, url, minutes)
+        posts = safe_harvest(driver, sources[index], ctx.store.is_seen)
         read += len(posts)
+        progress[CURSOR_KEY] = index + 1
         new = enqueue_new_posts(posts, ctx)
         queued += new
         if new:
             sent += drain()
-    ctx.source_cursor = 0
+    progress[CURSOR_KEY] = 0
+    progress[ROTATION_KEY] = progress.get(ROTATION_KEY, 0) + 1
     return read, queued, sent
 
 
@@ -449,7 +448,7 @@ def run_fresh_cycle(ctx: LoopContext, dry_run: bool) -> bool:
         driver.quit()
         closed = True
     except CHROME_ERRORS as exc:
-        ctx.source_cursor = ctx.current_source + 1
+        ctx.store.progress[CURSOR_KEY] = ctx.current_source + 1
         log.error("Chrome dejó de responder (%s) en la fuente %d; lo cierro y retomo desde la siguiente en %d min.",
                   type(exc).__name__, ctx.current_source, RETRY_AFTER_HANG_MINUTES)
     finally:
