@@ -46,15 +46,25 @@ CONSENT_LABEL = re.compile(
     r"acepto|accept|agree|consent|consiento|t[eé]rminos|terms|privacidad|privacy|pol[ií]tica|declaro|certif",
     re.IGNORECASE)
 CV_LABEL = re.compile(r"curr[ií]cul|resume|\bcv\b", re.IGNORECASE)
+# Entrada del perfil incompleta (p. ej. una educación sin fechas) que LinkedIn abre para editar y no
+# deja avanzar: se quita de esta solicitud; no se inventan los datos que faltan.
+REMOVE_ENTRY_TEXT = re.compile(r"^(eliminar|remove|delete) (educaci[oó]n|experiencia|education|experience|posici[oó]n)",
+                               re.IGNORECASE)
+CONFIRM_REMOVE_TEXT = re.compile(r"^(eliminar|remove|delete|s[ií], eliminar)$", re.IGNORECASE)
 READY = "guardada lista para enviar"
 SUBMITTED = EASY_APPLY_SENT
 START_WAIT_S = 12
 FORM_WAIT_S = 8
 OPEN_ATTEMPTS = 2
 
+# El formulario 2026 es un <dialog> con el título "Aplicar a…": si existe se usa ese contenedor
+# (subir a ciegas llegaba a la página entera cuando el contenido todavía no había cargado).
 ROOT_JS = r"""
-const h = [...document.querySelectorAll('h1,h2,h3')].find(t => /^(Aplicar a|Apply to|Solicitar en)/i.test((t.innerText||'').trim()));
+const h = [...document.querySelectorAll('h1,h2,h3')].find(t => /^(Aplicar a|Apply to|Solicitar en)/i.test((t.innerText||'').trim())
+                                                          && t.getClientRects().length > 0);
 if (!h) return null;
+const box = h.closest('dialog, [role=dialog], [aria-modal=true], .artdeco-modal');
+if (box) return box;
 let el = h;
 for (let i = 0; i < 8 && el.parentElement; i++) {
   el = el.parentElement;
@@ -186,11 +196,15 @@ class EasyApplyFiller:
         return None
 
     def _wait_for_root(self) -> WebElement | None:
-        """El formulario tarda en abrir entre 2 y 8 s según el aviso."""
+        """El formulario tarda en abrir entre 2 y 8 s según el aviso, y el título aparece antes que
+        los campos: se espera a que tenga su botón Siguiente/Revisar/Enviar."""
         deadline = time.time() + FORM_WAIT_S
-        while (root := self._root()) is None and time.time() < deadline:
+        while time.time() < deadline:
+            root = self._root()
+            if root is not None and self._primary_button(root) is not None:
+                return root
             time.sleep(1)
-        return root
+        return None
 
     def _walk_pages(self) -> ApplyResult:
         for _ in range(MAX_PAGES):
@@ -205,7 +219,7 @@ class EasyApplyFiller:
                 return ApplyResult("guardada incompleta", ("sin botón Siguiente",))
             if SUBMIT_TEXT.match(button.text.strip()):
                 return ApplyResult(READY)
-            if not self._advance(root, button):
+            if not self._advance(root, button) and not self._retry_without_incomplete_entry():
                 return ApplyResult("guardada incompleta", ("LinkedIn marcó un error en la página",))
         return ApplyResult("guardada incompleta", ("demasiadas páginas",))
 
@@ -308,6 +322,27 @@ class EasyApplyFiller:
     def _primary_button(root: WebElement) -> WebElement | None:
         buttons = [b for b in root.find_elements(By.TAG_NAME, "button") if b.text.strip()]
         return next((b for b in buttons if SUBMIT_TEXT.match(b.text.strip()) or NEXT_TEXT.match(b.text.strip())), None)
+
+    def _retry_without_incomplete_entry(self) -> bool:
+        """Quita de la solicitud la entrada que quedó abierta con campos obligatorios vacíos y vuelve a avanzar."""
+        root = self._root()
+        if root is None:
+            return False
+        remove = next((b for b in root.find_elements(By.TAG_NAME, "button")
+                       if REMOVE_ENTRY_TEXT.match(b.text.strip()) and b.is_displayed()), None)
+        if remove is None:
+            return False
+        log.info("Solicitud sencilla: quito una entrada incompleta del perfil (%s).", remove.text.strip())
+        self.driver.execute_script("arguments[0].click()", remove)
+        time.sleep(2)
+        confirm = next((b for b in self.driver.find_elements(By.TAG_NAME, "button")
+                        if CONFIRM_REMOVE_TEXT.match((b.text or "").strip()) and b.is_displayed()), None)
+        if confirm is not None:
+            self.driver.execute_script("arguments[0].click()", confirm)
+            time.sleep(2)
+        root = self._root()
+        button = self._primary_button(root) if root is not None else None
+        return button is not None and self._advance(root, button)
 
     def _advance(self, root: WebElement, button: WebElement) -> bool:
         """Clic en Siguiente/Revisar. False si la página no cambió (LinkedIn marcó un error)."""

@@ -25,6 +25,7 @@ DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 VIEW_URL = "https://www.linkedin.com/jobs/view/{job_id}/"
 ARGENTINA_GEO_ID = "100446943"
 LAST_24_HOURS = "r86400"
+LAST_WEEK = "r604800"
 PAGES_PER_QUERY = 2
 PAGE_SIZE = 10
 # LinkedIn sin sesión responde 429 tras unos pocos pedidos seguidos: pocas búsquedas por
@@ -57,11 +58,16 @@ class SearchScope:
     remote_only: bool
     geo_id: str = ""
     location: str = ""
+    window: str = LAST_24_HOURS
+    easy_apply_only: bool = True
 
 
 # De Córdoba hacia afuera: Córdoba con cualquier modalidad, después el resto de Argentina solo remoto.
 LOCAL_SCOPES = (
-    SearchScope("Córdoba", remote_only=False, location="Córdoba, Argentina"),
+    # Córdoba casi no tiene avisos con Solicitud sencilla en 24 h (medido: 0 en 10 búsquedas): se mira la
+    # semana y también los que se postulan por fuera, que quedan en la lista para postular a mano.
+    SearchScope("Córdoba", remote_only=False, location="Córdoba, Argentina", window=LAST_WEEK,
+                easy_apply_only=False),
     SearchScope("Argentina remoto", remote_only=True, geo_id=ARGENTINA_GEO_ID),
 )
 FOREIGN_SCOPES = (
@@ -151,8 +157,10 @@ def searches_for_cycle(queries: list[str], cycle: int) -> list[tuple[str, Search
 
 def search_params(query: str, scope: SearchScope, page: int) -> dict[str, str | int]:
     # f_AL: solo Solicitud sencilla (lo que se puede postular solo); sortBy=DD: lo más nuevo primero.
-    params: dict[str, str | int] = {"keywords": query, "f_TPR": LAST_24_HOURS, "f_AL": "true",
-                                    "sortBy": "DD", "start": page * PAGE_SIZE}
+    params: dict[str, str | int] = {"keywords": query, "f_TPR": scope.window, "sortBy": "DD",
+                                    "start": page * PAGE_SIZE}
+    if scope.easy_apply_only:
+        params["f_AL"] = "true"
     if scope.geo_id:
         params["geoId"] = scope.geo_id
     if scope.location:

@@ -95,6 +95,7 @@ def test_search_params_remote_scope_filters_remote_and_cordoba_does_not():
 
     assert remote["f_WT"] == "2" and "location" not in remote
     assert "f_WT" not in cordoba and cordoba["location"] == "Córdoba, Argentina"
+    assert remote["f_AL"] == "true" and "f_AL" not in cordoba and cordoba["f_TPR"] == "r604800"
 
 
 def test_lab_testing_role_is_not_a_qa_role():
