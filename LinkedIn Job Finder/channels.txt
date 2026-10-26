@@ -17,32 +17,46 @@ https://www.linkedin.com/groups/3901022/
 https://www.linkedin.com/groups/45535/
 https://www.linkedin.com/groups/52955/
 
-# Búsqueda de publicaciones (más recientes primero). Corren todas, primero, en cada vuelta.
-# Frase de CV + un solo término: cuantas más palabras obligatorias, menos resultados.
+# Búsqueda de publicaciones (más recientes primero). Corren todas, primero, en cada vuelta y en este
+# orden: Córdoba → Argentina (trainee/junior/semi senior) → generales → LATAM.
+# Córdoba
+https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20c%C3%B3rdoba%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20programador&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20junior&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20trainee&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20qa&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20soporte&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22cv%22%20c%C3%B3rdoba%20sistemas&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=b%C3%BAsqueda%20c%C3%B3rdoba%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
+# Argentina, trainee / junior / semi senior
+https://www.linkedin.com/search/results/content/?keywords=desarrollador%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=programador%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=python%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=qa%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=tester%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=trainee%20sistemas%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=trainee%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=semi%20senior%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=ssr%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=soporte%20t%C3%A9cnico%20junior%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=pasante%20sistemas%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
+# Generales
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20programador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20python&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20backend&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20qa&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20tester&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20%22full%20stack%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22%20soporte&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22env%C3%ADa%20tu%20cv%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22env%C3%ADa%20tu%20cv%22%20python&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22envianos%20tu%20cv%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22mandame%20tu%20cv%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22enviame%20tu%20cv%22%20programador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22cv%20a%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22cv%20a%22%20python&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22cv%20a%22%20qa&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=buscamos%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=buscamos%20backend%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=buscamos%20qa%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=junior%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=trainee%20desarrollador%20%22cv%22&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22send%20your%20cv%22%20developer&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22send%20your%20resume%22%20developer&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22we%27re%20hiring%22%20python&datePosted=%22past-week%22&sortBy=%22date_posted%22
-https://www.linkedin.com/search/results/content/?keywords=%22estamos%20buscando%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22b%C3%BAsqueda%20laboral%22%20desarrollador&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22oportunidad%20laboral%22%20programador&datePosted=%22past-week%22&sortBy=%22date_posted%22
+# LATAM remoto
+https://www.linkedin.com/search/results/content/?keywords=%22send%20your%20cv%22%20developer%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=%22we%27re%20hiring%22%20python%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=junior%20developer%20remote%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22

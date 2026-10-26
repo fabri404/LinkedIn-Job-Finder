@@ -29,7 +29,15 @@ import urllib3
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 
-from classifier import JobPosting, evaluate_job, evaluate_post, evaluate_vacancy, is_profile_title, post_author
+from classifier import (
+    JobPosting,
+    evaluate_job,
+    evaluate_post,
+    evaluate_vacancy,
+    is_dev_title,
+    is_profile_title,
+    post_author,
+)
 from composer import URL_PATTERN, Application, Outreach, compose, compose_outreach, linkedin_message, select_cv
 from config import (
     BASE_DIR,
@@ -74,7 +82,7 @@ from recruiters import (
 )
 from relevance import relevance_score
 from sources import plan_sources
-from store import VETO_FILE, QueuedApplication, Store
+from store import VETO_FILE, QueuedApplication, Store, normalize_role
 
 log = logging.getLogger("job_finder")
 # Una línea por post evaluado: va a data/audit.log para que job_finder.log (el que lee el
@@ -177,8 +185,16 @@ def enqueue_new_posts(posts: list[FeedPost], ctx: LoopContext) -> int:
 
 
 def _record_post_lead(post: FeedPost, posting: JobPosting, ctx: LoopContext) -> None:
-    """Vacante acorde sin email: queda en la lista para escribirle a quien la publicó por LinkedIn."""
+    """Vacante acorde sin email: queda en la lista para escribirle a quien la publicó por LinkedIn.
+
+    Solo con un puesto IT reconocible (las páginas agregadoras y los posts de opinión no lo tienen)
+    y una vez por autor y puesto: los recruiters publican el mismo aviso en varios grupos."""
     author = post_author(post.text)
+    lead_key = f"lead:{normalize_role(author)}:{normalize_role(posting.role_title)}"
+    if not is_dev_title(posting.role_title) or ctx.store.is_seen(lead_key):
+        audit.info("  contacto por LinkedIn omitido (sin puesto IT claro o repetido): %s", author)
+        return
+    ctx.store.mark_seen(lead_key)
     links = " ".join(dict.fromkeys(URL_PATTERN.findall(post.text)))
     first_name = author.split()[0] if author else ""
     ctx.store.record_lead((date.today().isoformat(), author, "", posting.role_title, post.url, links,

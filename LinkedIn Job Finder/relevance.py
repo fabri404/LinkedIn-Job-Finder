@@ -1,7 +1,9 @@
 """relevance.py - Cuánto encaja una vacante con el perfil de Adriel (Python/FastAPI, QA, junior).
 
 No descarta nada: ordena la cola para que los borradores más acordes salgan primero cuando el cupo
-diario no alcanza para todos.
+diario no alcanza para todos. Prioridades: nivel trainee/junior/semi senior (o sin aclarar) y
+ubicación de adentro hacia afuera: Córdoba → resto de Argentina → Chile, Paraguay, Colombia, España,
+México → el resto.
 """
 
 from __future__ import annotations
@@ -15,13 +17,16 @@ RELEVANCE_RULES: tuple[tuple[int, re.Pattern[str]], ...] = (
     (3, re.compile(r"\b(python|fastapi|django|flask)\b")),
     (2, re.compile(r"\b(qa|tester|testing|automation|automatizaci[oó]n|selenium|playwright|pytest)\b")),
     (1, re.compile(r"\b(sql|postgres(ql)?|docker|api rest|apis?|back[- ]?end)\b")),
-    (2, re.compile(r"\b(junior|jr\.?|trainee|pasant[eí]a?|sin experiencia|entry level)\b")),
-    (1, re.compile(r"\b(remoto|remote|home office)\b")),
-    (1, re.compile(r"\bc[oó]rdoba\b")),
+    (3, re.compile(r"\b(junior|jr\.?|trainee|pasant[eí]a?|sin experiencia|entry level|primer empleo)\b")),
+    (2, re.compile(r"\b(semi ?senior|ssr\.?|semisenior|mid[- ]level)\b")),
     # Lookarounds en vez de \b: ".net" y "c#" empiezan o terminan con un símbolo.
     (-3, re.compile(r"(?<!\w)(java|asp\.net|\.net|c#|php|kotlin|sap|abap|salesforce|cobol|cnc)(?![\w#])")),
     (-1, re.compile(r"\b(swift|ios|android|flutter|angular|unity)\b")),
 )
+# "Engineer"/"Ingeniero" sin nivel de entrada suele ser un puesto mid/senior: un poco más abajo.
+ENGINEER_TITLE = re.compile(r"\b(engineer|ingenier[oa])\b")
+ENTRY_LEVEL = re.compile(r"\b(junior|jr\.?|trainee|pasant|semi ?senior|ssr|entry level|i)\b")
+ARGENTINA_PLACES = ("argentina", "buenos aires", "caba", "rosario", "mendoza", "santa fe", "tucumán", "#arg")
 
 
 def relevance_score(posting: JobPosting) -> int:
@@ -29,13 +34,14 @@ def relevance_score(posting: JobPosting) -> int:
     body = split_post(posting.text)[1].lower()
     title = posting.role_title.lower()
     rules = sum(weight * (bool(rule.search(body)) + bool(rule.search(title))) for weight, rule in RELEVANCE_RULES)
-    return rules + location_bonus(body)
+    engineer = -2 if ENGINEER_TITLE.search(title) and not ENTRY_LEVEL.search(title) else 0
+    return rules + engineer + location_bonus(body)
 
 
 def location_bonus(body: str) -> int:
-    """Preferencias de Adriel: presencial/híbrido en Córdoba, o remoto en Chile, Paraguay, Colombia,
-    España o México."""
-    in_cordoba = any(term in body for term in CORDOBA_TERMS)
-    if in_cordoba and work_modality(body) in ("hybrid", "onsite"):
+    """De adentro hacia afuera: Córdoba (más si es presencial/híbrido) → Argentina → países preferidos."""
+    if any(term in body for term in CORDOBA_TERMS):
+        return 6 if work_modality(body) in ("hybrid", "onsite") else 5
+    if any(place in body for place in ARGENTINA_PLACES):
         return 3
     return 2 if is_preferred_remote_country(body) else 0

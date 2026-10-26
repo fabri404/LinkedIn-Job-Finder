@@ -23,7 +23,7 @@ def test_relevance_score_python_junior_ranks_above_java():
     java = relevance_score(_posting("Buscamos Desarrollador Java Jr con Spring."))
 
     # Assert
-    assert python > 0 > java
+    assert python > java
 
 
 def test_store_enqueue_orders_by_score_keeping_arrival_order_on_ties(tmp_path):

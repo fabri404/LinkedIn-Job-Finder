@@ -91,7 +91,7 @@ def test_searches_for_cycle_covers_argentina_remote_cordoba_and_one_preferred_co
 def test_search_params_remote_scope_filters_remote_and_cordoba_does_not():
     from jobs import LOCAL_SCOPES, search_params
 
-    remote, cordoba = (search_params("python", scope, 0) for scope in LOCAL_SCOPES)
+    cordoba, remote = (search_params("python", scope, 0) for scope in LOCAL_SCOPES)
 
     assert remote["f_WT"] == "2" and "location" not in remote
     assert "f_WT" not in cordoba and cordoba["location"] == "Córdoba, Argentina"
@@ -102,3 +102,21 @@ def test_lab_testing_role_is_not_a_qa_role():
 
     text = "Incorpora Analista SSR de Microbiología. Testing de muestras en laboratorio."
     assert not is_dev_role(text, "Analista SSR de Microbiología")
+
+
+def test_relevance_goes_from_cordoba_outwards():
+    cordoba = _score("Remoto, equipo en Córdoba.")
+    argentina = _score("Remoto, empresa de Buenos Aires.")
+    preferred = _score("100% remoto, empresa de Chile.")
+    elsewhere = _score("100% remoto, empresa de Alemania.")
+    assert cordoba > argentina > preferred > elsewhere
+
+
+def test_relevance_prefers_entry_levels_over_unstated_and_engineer_titles():
+    from classifier import _build_posting
+
+    def score(role: str) -> int:
+        return relevance_score(_build_posting(f"Buscamos {role}. 100% remoto. Enviar CV a a@b.com", ("a@b.com",)))
+
+    assert score("Desarrollador Python Trainee") > score("Desarrollador Python Semi Senior") > score("Desarrollador Python")
+    assert score("Desarrollador Python") > score("Software Engineer Python")

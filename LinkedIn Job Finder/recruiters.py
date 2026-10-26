@@ -27,11 +27,12 @@ SEARCH_URL = "https://www.linkedin.com/search/results/people/?keywords={query}&g
 PROFILE_URL = "https://www.linkedin.com/in/{slug}/"
 ACTIVITY_URL = "https://www.linkedin.com/in/{slug}/recent-activity/all/"
 # El 2026-10-19 LinkedIn puso un "checkpoint" de seguridad ("tu cuenta accedió a una cantidad considerable
-# de datos de perfiles") tras ~35 perfiles y 12 páginas de búsqueda por hora. Ahora: 3 perfiles por vuelta
-# (~1 h), 15 por día y hasta 3 páginas de búsqueda por vuelta, con 1-2 min entre perfiles. 0 = desactivado.
-MAX_PROFILES_PER_CYCLE = 0
-MAX_PROFILES_PER_DAY = 15
-MAX_FOLLOWS_PER_DAY = 15
+# de datos de perfiles") tras ~35 perfiles y 12 páginas de búsqueda por hora. Reactivado con margen: 3 perfiles
+# por vuelta (~40 min), 12 por día y hasta 3 páginas de búsqueda por vuelta, con 1-2 min entre perfiles.
+# Seguirlos además suma sus búsquedas al feed. 0 = desactivado.
+MAX_PROFILES_PER_CYCLE = 3
+MAX_PROFILES_PER_DAY = 12
+MAX_FOLLOWS_PER_DAY = 12
 # Las primeras páginas de cada búsqueda ya se visitaron: se avanza de página hasta hallar perfiles nuevos.
 SEARCH_PAGES_PER_CYCLE = 3
 MAX_SEARCH_PAGE = 10

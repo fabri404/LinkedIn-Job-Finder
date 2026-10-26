@@ -59,10 +59,10 @@ class SearchScope:
     location: str = ""
 
 
-# Fuera de Córdoba solo sirve el remoto; en Córdoba, cualquier modalidad.
+# De Córdoba hacia afuera: Córdoba con cualquier modalidad, después el resto de Argentina solo remoto.
 LOCAL_SCOPES = (
-    SearchScope("Argentina remoto", remote_only=True, geo_id=ARGENTINA_GEO_ID),
     SearchScope("Córdoba", remote_only=False, location="Córdoba, Argentina"),
+    SearchScope("Argentina remoto", remote_only=True, geo_id=ARGENTINA_GEO_ID),
 )
 FOREIGN_SCOPES = (
     SearchScope("Chile remoto", remote_only=True, geo_id="104621616"),

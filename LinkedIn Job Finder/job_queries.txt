@@ -1,11 +1,13 @@
-# Búsquedas en LinkedIn → Empleos (Argentina, últimas 24 h). Una por línea.
+# Búsquedas en LinkedIn → Empleos (Córdoba primero, después Argentina remoto). Una por línea; rotan.
+desarrollador junior
+python junior
+qa junior
+trainee
+desarrollador trainee
+semi senior desarrollador
+soporte técnico
+tester
 python
 backend
 desarrollador
-developer
-full stack
-qa
-tester
-qa automation
-devops
-soporte técnico
+full stack junior

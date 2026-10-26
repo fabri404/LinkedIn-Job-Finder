@@ -83,3 +83,30 @@ def test_drain_queue_skips_vetoed_email(tmp_path):
     # Assert
     assert sent_to == ["ok@x.com"]
     assert store.contacted["malo@x.com"] == "descartado: descartado a mano"
+
+
+def test_record_post_lead_skips_repeated_and_roleless_leads(tmp_path):
+    # Arrange
+    from types import SimpleNamespace
+
+    import main
+    from classifier import evaluate_post
+    from feed import FeedPost
+    from store import LEADS_CSV, Store
+
+    store = Store(tmp_path)
+    ctx = SimpleNamespace(store=store)
+    text = "Publicación en el feed\nRuth Leytes • 2º\nRecruiter\n3 h •\nBuscamos Desarrollador Python jr. Remoto."
+    posting = evaluate_post(text, [])[1]
+    aggregator = evaluate_post("Publicación en el feed\nEmpleos.io\n3 h •\nBuscamos talento! Remoto. Requisitos: Python",
+                               [])[1]
+
+    # Act
+    for url in ("u1", "u2"):
+        main._record_post_lead(FeedPost("k" + url, text, url), posting, ctx)
+    if aggregator is not None:
+        main._record_post_lead(FeedPost("k3", "x", "u3"), aggregator, ctx)
+
+    # Assert
+    rows = (tmp_path / LEADS_CSV).read_text(encoding="utf-8").splitlines()
+    assert len(rows) == 2  # encabezado + una sola fila

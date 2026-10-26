@@ -127,3 +127,20 @@ def test_split_post_and_post_author_skip_context_and_hidden_title():
     # Assert
     assert body.strip() == "Buscamos dev"
     assert post_author(text) == "María Pérez"
+
+
+def test_extract_emails_glued_to_next_word_is_cut_at_the_domain():
+    assert extract_emails("CV a vrojas@crnova.comcon asunto y rrhh@a.com.arcon foto") == ("vrojas@crnova.com",
+                                                                                         "rrhh@a.com.ar")
+
+
+@pytest.mark.parametrize("title", ["Engenheira de Software Sênior Backend", "QA Lead – Capital Markets"])
+def test_check_seniority_portuguese_senior_and_role_lead_are_rejected(title):
+    assert not check_seniority(title).accepted
+
+
+@pytest.mark.parametrize("role", ["QA/QC Technician (Metering)", "ARQUITECTO DESARROLLADOR DE CABIDAS DE VIVIENDAS"])
+def test_is_dev_role_industrial_qa_and_real_estate_architect_are_rejected(role):
+    from classifier import is_dev_role
+
+    assert not is_dev_role("texto", role)

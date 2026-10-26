@@ -107,8 +107,8 @@ NON_DEV_ROLE_PATTERN = re.compile(
 )
 
 SENIOR_PATTERN = re.compile(
-    r"\b(senior|sr\.?|líder técnico|tech lead|team lead|lead (?:developer|engineer|dev|backend|qa)|"
-    r"principal (?:engineer|developer))\b"
+    r"\b(senior|s[eê]nior|sr\.?|líder técnico|tech lead|team lead|lead (?:developer|engineer|dev|backend|qa)|"
+    r"(?:qa|test|dev|engineering|technical|development) lead|principal (?:engineer|developer))\b"
 )
 # "sumarte a un equipo de devs senior": describe a los compañeros, no el puesto.
 SENIOR_TEAM_CONTEXT = re.compile(
@@ -185,7 +185,8 @@ FOREIGN_EMAIL_TLDS = (".mx", ".cl", ".pe", ".ec", ".co", ".uy", ".py", ".bo", ".
 # Títulos que dicen "desarrollador" o "developer" pero no son el perfil (negocios, SAP, BI).
 OFF_PROFILE_TITLE_PATTERN = re.compile(
     r"negocios|business develop|\bsap\b|abap|wricef|salesforce|power ?bi|\bcnc\b|\bplc\b|costos|pricing|"
-    r"\bbpm\b|docente|convocatoria docente",
+    r"\bbpm\b|docente|convocatoria docente|qa/qc|qc (inspector|technician)|metering|welding|piping|\bhse\b|"
+    r"vivienda|inmobiliari|cabidas?\b|arquitect[oa] (?!de software|de soluciones|cloud|de datos)",
     re.IGNORECASE,
 )
 # Palabra completa: con substring, "lima" aparecía en "buen clima laboral" y "usa" en "causa".
@@ -330,10 +331,19 @@ def score_job_posting(text: str) -> JobScore:
     return JobScore(sum(w for w, _, _ in hits), tuple(r for _, _, r in hits), hiring_signal)
 
 
+# El email pegado a la palabra siguiente ("rrhh@empresa.comcon el asunto"): se corta en el dominio.
+GLUED_TLD = re.compile(r"\.(com|net|org|edu|gob|gov)(?:con|para|y|or|and|en|a|indicando|asunto|subject)$")
+GLUED_CC_TLD = re.compile(r"\.com\.(ar|mx|co|pe|br|uy|py|cl|ec|bo)(?:con|para|y|en|a|indicando|asunto)$")
+
+
+def _unglue(email: str) -> str:
+    return GLUED_CC_TLD.sub(r".com.\1", GLUED_TLD.sub(r".\1", email))
+
+
 def extract_emails(text: str) -> tuple[str, ...]:
     found = []
     for raw in EMAIL_PATTERN.findall(text):
-        email = raw.lower().strip().rstrip(".")
+        email = _unglue(raw.lower().strip().rstrip("."))
         domain = email.split("@")[1]
         if domain in BLACKLIST_DOMAINS or email in OWN_EMAILS or email in found or NOT_RECRUITER_MAILBOX.match(email):
             continue
@@ -358,6 +368,20 @@ def matches_keywords(text: str, keywords: list[str]) -> bool:
     return not keywords or any(keyword in text_lower for keyword in keywords)
 
 
+# Un puesto concreto que no es IT ("Document Controller", "Analista de Compras"): el texto puede
+# mencionar sistemas o Excel, pero el cargo manda.
+JOB_NOUN_PATTERN = re.compile(
+    r"\b(analista|t[eé]cnic[oa]|technician|controller|coordinador[a]?|coordinator|asistente|assistant|auxiliar|"
+    r"ejecutiv[oa]|especialista|specialist|responsable|jef[ea]|encargad[oa]|gerente|manager|consultor[a]?|"
+    r"vendedor[a]?|representante|operari[oa]|administrativ[oa])\b", re.IGNORECASE)
+
+
+# Cargos genéricos que sí son de IT: "Analista de IA", "Técnico de Sistemas", "Especialista de Datos".
+IT_AREA_PATTERN = re.compile(
+    r"\b(ia|ai|it|ti|sistemas|software|datos|data|tecnolog[ií]a|inform[aá]tic[oa]|soporte|qa|testing|python|"
+    r"desarroll\w*|programaci[oó]n|redes|infraestructura|cloud|automatizaci[oó]n)\b", re.IGNORECASE)
+
+
 def is_dev_role(text: str, role_title: str) -> bool:
     """El puesto extraído manda; si no hay puesto claro, se mira el texto con la lista estricta."""
     if role_title and OFF_PROFILE_TITLE_PATTERN.search(role_title):
@@ -365,6 +389,8 @@ def is_dev_role(text: str, role_title: str) -> bool:
     if role_title and is_dev_title(role_title):
         return True
     if role_title and NON_DEV_ROLE_PATTERN.search(role_title):
+        return False
+    if role_title and JOB_NOUN_PATTERN.search(role_title) and not IT_AREA_PATTERN.search(role_title):
         return False
     return is_dev_title(text)
 
