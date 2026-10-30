@@ -25,6 +25,10 @@ LOG_TAIL_BYTES = 400_000
 CONTENT_SEARCH_URL = ("https://www.linkedin.com/search/results/content/?keywords={}"
                       "&datePosted=%22past-week%22&sortBy=%22date_posted%22")
 KEYWORDS_PARAM = re.compile(r"/search/results/content/\?keywords=([^&]*)")
+# Sin fecha: el post puede ser de hace semanas cuando llega la respuesta del recruiter.
+EMAIL_SEARCH_URL = "https://www.linkedin.com/search/results/content/?keywords={}"
+POST_URL = re.compile(r"/feed/update/|/posts/")
+PROFILE_URL = re.compile(r"/in/|/company/")
 MAX_QUERY_CHARS = 120
 LOG_LINE = re.compile(r"^(?P<ts>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ (?P<level>[A-Z]+) (?P<msg>.*)$")
 IMPORTANT_LOG = re.compile(r"BORRADOR|EMPLEO →|LINKEDIN →|RECRUITER →|ERROR|CRITICAL|checkpoint|Iniciá sesión|"
@@ -84,6 +88,25 @@ def read_csv_rows(name: str, limit: int) -> list[dict[str, str]]:
             return list(csv.DictReader(file))
 
     return _cached(path, load)[::-1][:limit]
+
+
+def draft_link(post_url: str, email: str) -> tuple[str, str]:
+    """(url, etiqueta) para ver la vacante de un borrador.
+
+    El scraper no siempre obtiene el link del post: entonces queda el perfil de quien lo publicó y,
+    si tampoco está, una búsqueda de publicaciones con el email, que figura en el texto del post."""
+    if POST_URL.search(post_url):
+        return post_url, "ver post"
+    if PROFILE_URL.search(post_url):
+        return post_url, "perfil del autor"
+    return EMAIL_SEARCH_URL.format(quote(f'"{email}"')), "buscar post"
+
+
+def read_drafts(limit: int) -> list[dict[str, str]]:
+    """Borradores enviados con el link a la vacante (`link`, `link_label`)."""
+    rows = read_csv_rows("enviados.csv", limit)
+    return [row | dict(zip(("link", "link_label"), draft_link(row.get("post_url") or "", row.get("email") or "")))
+            for row in rows]
 
 
 def _log_tail() -> list[LogEntry]:

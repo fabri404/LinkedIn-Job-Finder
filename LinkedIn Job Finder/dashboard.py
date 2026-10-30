@@ -60,6 +60,10 @@ def get_csv(name: str) -> Handler:
     return lambda params: (HTTPStatus.OK, data.read_csv_rows(name, _limit(params)))
 
 
+def get_drafts(params: dict[str, Any]) -> tuple[HTTPStatus, Any]:
+    return HTTPStatus.OK, data.read_drafts(_limit(params))
+
+
 def get_log(params: dict[str, Any]) -> tuple[HTTPStatus, Any]:
     return HTTPStatus.OK, data.important_log(_limit(params))
 
@@ -102,7 +106,7 @@ def delete_search(params: dict[str, Any]) -> tuple[HTTPStatus, Any]:
 
 ROUTES: dict[tuple[str, str], Handler] = {
     ("GET", "/api/status"): get_status,
-    ("GET", "/api/drafts"): get_csv("enviados.csv"),
+    ("GET", "/api/drafts"): get_drafts,
     ("GET", "/api/jobs"): get_csv("empleos_linkedin.csv"),
     ("GET", "/api/leads"): get_csv("contactar_linkedin.csv"),
     ("GET", "/api/log"): get_log,

@@ -58,6 +58,27 @@ def test_remove_search_keeps_other_sources(workspace):
     assert data.other_sources_count() == 1
 
 
+@pytest.mark.parametrize(("post_url", "expected_url", "label"), [
+    ("https://www.linkedin.com/feed/update/urn:li:activity:1/", "https://www.linkedin.com/feed/update/urn:li:activity:1/",
+     "ver post"),
+    ("https://www.linkedin.com/in/ana-perez/", "https://www.linkedin.com/in/ana-perez/", "perfil del autor"),
+    ("", data.EMAIL_SEARCH_URL.format("%22rrhh%40acme.com%22"), "buscar post"),
+])
+def test_draft_link_falls_back_from_post_to_profile_to_email_search(post_url, expected_url, label):
+    assert data.draft_link(post_url, "rrhh@acme.com") == (expected_url, label)
+
+
+def test_read_drafts_adds_link_to_each_row(workspace):
+    sent = workspace / "data" / "enviados.csv"
+    sent.write_text(sent.read_text() + "2026-10-25T22:20:21,rrhh@acme.com,Backend,Asunto,CV.pdf,\n", encoding="utf-8")
+
+    [row] = data.read_drafts(limit=10)
+
+    assert row["email"] == "rrhh@acme.com"
+    assert row["link_label"] == "buscar post"
+    assert "rrhh%40acme.com" in row["link"]
+
+
 @pytest.mark.parametrize("query", ["", "   ", "x" * (data.MAX_QUERY_CHARS + 1)])
 def test_clean_query_with_invalid_text_raises_value_error(query):
     with pytest.raises(ValueError):

@@ -60,3 +60,7 @@ https://www.linkedin.com/search/results/content/?keywords=%22oportunidad%20labor
 https://www.linkedin.com/search/results/content/?keywords=%22send%20your%20cv%22%20developer%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=%22we%27re%20hiring%22%20python%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22
 https://www.linkedin.com/search/results/content/?keywords=junior%20developer%20remote%20latam&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=desarollador%20backend&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=fullstack&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=programador&datePosted=%22past-week%22&sortBy=%22date_posted%22
+https://www.linkedin.com/search/results/content/?keywords=programador%20junior&datePosted=%22past-week%22&sortBy=%22date_posted%22
