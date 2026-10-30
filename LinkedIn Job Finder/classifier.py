@@ -102,7 +102,25 @@ NON_DEV_ROLE_PATTERN = re.compile(
     r"\brisk\b|riesgo|fraude|\bfraud\b|prevenci[oó]n|docente|profesor|instructor|tutor|capacitador|"
     r"suscriptor|underwriter|seguros|t[eé]cnico de ingenier|miner[oa]|miner[ií]a|soldador|electricista|"
     r"operador de (planta|m[aá]quina|equipo)|chofer|conductor|microbiolog|bioqu[ií]mic|qu[ií]mic[oa]|"
-    r"laboratorio|farmac|alimentos|calidad y acreditaci|estructuras|dise[ñn]o de estructuras",
+    r"laboratorio|farmac|alimentos|calidad y acreditaci|estructuras|dise[ñn]o de estructuras|"
+    r"\bseo\b|content writer|copywriter|redactor|geof[ií]sic|geophysic|geolog",
+    re.IGNORECASE,
+)
+# QA, inspección y "testing" de industria (petróleo, construcción, energía): "QA" no alcanza para
+# que sea IT. Medido 25–28/10: inspectores QA/QC en Qatar, UAE y Nigeria llegaban como borradores.
+INDUSTRIAL_PATTERN = re.compile(
+    r"qa/qc|qa ?& ?qc|\bqc\b|quality control|quality inspector|\binspector|\be&i\b|\bi&c\b|metering|"
+    r"refiner|oil (?:and|&) gas|petrol|offshore|onshore|piping|welding|soldad|\bndt\b|\bhse\b|"
+    r"construction|construcci[oó]n|civil engineer|ingenier[oa] civil|mechanical engineer|electrical engineer|"
+    r"instrumentation|commissioning|scaffold|shuttering|foreman|solar project|\bepc\b|precast|food processing",
+    re.IGNORECASE,
+)
+# Contexto de software: con esto, "QA" o "testing" sí son del perfil.
+SOFTWARE_CONTEXT = re.compile(
+    r"software|\bweb\b|\bapps?\b|aplicaci[oó]n|\bapis?\b|selenium|cypress|playwright|postman|jira|"
+    r"automatizaci[oó]n de pruebas|test automation|automation testing|manual testing|testing manual|"
+    r"python|javascript|typescript|\bsql\b|back[- ]?end|front[- ]?end|full[- ]?stack|desarrollador|developer|"
+    r"programador|sistemas",
     re.IGNORECASE,
 )
 
@@ -178,10 +196,19 @@ FOREIGN_PLACES = (
     "gujarat", "kolkata", "las condes", "pudahuel", "medellin",
     # Jerga de avisos de India e Indonesia: nunca aparece en búsquedas de Argentina.
     "immediate joiner", "early joiner", "notice period", "wfo",
+    # Golfo, Asia, África, Europa y Norteamérica: ofertas reales que llegaban como borradores.
+    "qatar", "doha", "uae", "dubai", "abu dhabi", "sharjah", "saudi arabia", "saudi", "riyadh", "jeddah",
+    "oman", "omani", "muscat", "kuwait", "kuwaiti", "qatari", "emirati", "bahrain", "azerbaijan", "baku", "nigeria", "akwa ibom", "kenya", "nairobi",
+    "south africa", "egypt", "cairo", "philippines", "manila", "vietnam", "malaysia", "kuala lumpur",
+    "singapore", "thailand", "bangkok", "sidoarjo", "australia", "sydney", "melbourne", "toronto",
+    "vancouver", "ontario", "alberta", "calgary", "montreal", "germany", "alemania", "berlin", "france",
+    "francia", "paris", "italy", "italia", "portugal", "lisboa", "lisbon", "netherlands", "amsterdam",
+    "poland", "polonia", "ireland", "dublin", "texas", "california", "florida", "new york",
 )
 # Dominio de país del email del reclutador: sin mención de Argentina, la búsqueda es de ese país.
 FOREIGN_EMAIL_TLDS = (".mx", ".cl", ".pe", ".ec", ".co", ".uy", ".py", ".bo", ".ve", ".es", ".br", ".in", ".pk",
-                      ".id", ".cr", ".gt", ".hn", ".sv", ".pa", ".do", ".ni", ".cu", ".pr")
+                      ".id", ".cr", ".gt", ".hn", ".sv", ".pa", ".do", ".ni", ".cu", ".pr", ".qa", ".ae", ".om",
+                      ".sa", ".kw", ".bh", ".ca", ".ng", ".za", ".au", ".uk", ".az", ".eg", ".ph", ".my", ".sg")
 # Títulos que dicen "desarrollador" o "developer" pero no son el perfil (negocios, SAP, BI).
 OFF_PROFILE_TITLE_PATTERN = re.compile(
     r"negocios|business develop|\bsap\b|abap|wricef|salesforce|power ?bi|\bcnc\b|\bplc\b|costos|pricing|"
@@ -382,9 +409,16 @@ IT_AREA_PATTERN = re.compile(
     r"desarroll\w*|programaci[oó]n|redes|infraestructura|cloud|automatizaci[oó]n)\b", re.IGNORECASE)
 
 
+def is_industrial(text: str) -> bool:
+    """QA, inspección o ingeniería de industria sin ningún contexto de software."""
+    return bool(INDUSTRIAL_PATTERN.search(text)) and not SOFTWARE_CONTEXT.search(text)
+
+
 def is_dev_role(text: str, role_title: str) -> bool:
     """El puesto extraído manda; si no hay puesto claro, se mira el texto con la lista estricta."""
-    if role_title and OFF_PROFILE_TITLE_PATTERN.search(role_title):
+    if role_title and (OFF_PROFILE_TITLE_PATTERN.search(role_title) or INDUSTRIAL_PATTERN.search(role_title)):
+        return False
+    if is_industrial(text):
         return False
     if role_title and is_dev_title(role_title):
         return True
@@ -463,7 +497,20 @@ def check_location(text: str) -> Verdict:
         return Verdict(True, f"{MODALITY_LABELS[modality]} en Córdoba")
     if modality != "unknown":
         return Verdict(False, f"{MODALITY_LABELS[modality]} fuera de Córdoba")
+    abroad = _abroad_without_argentina(text, text_lower)
+    if abroad:
+        return Verdict(False, f"sin modalidad y en otro país ({abroad})")
     return Verdict(True, "sin modalidad aclarada: se postula por las dudas")
+
+
+def _abroad_without_argentina(text: str, text_lower: str) -> str | None:
+    """Lugar o email de otro país sin mención de Argentina: sin modalidad aclarada es presencial allá."""
+    if any(term in text_lower for term in ARGENTINA_TERMS):
+        return None
+    place = FOREIGN_PLACE_PATTERN.search(text_lower) or US_PATTERN.search(text)
+    if place:
+        return place.group(0)
+    return next((email for email in EMAIL_PATTERN.findall(text_lower) if email.endswith(FOREIGN_EMAIL_TLDS)), None)
 
 
 def _requires_foreign_residence(text_lower: str) -> bool:
@@ -562,8 +609,11 @@ def check_vacancy(text: str, keywords: list[str]) -> Verdict:
     body = split_post(text)[1]
     if not matches_keywords(body, keywords):
         return Verdict(False, "sin keywords")
-    if not is_dev_role(body, extract_role_title(body)):
+    role_title = extract_role_title(body)
+    if not is_dev_role(body, role_title):
         return Verdict(False, "rol fuera del perfil")
+    if is_above_level_title(role_title):
+        return Verdict(False, f"puesto Senior/Lead: {role_title}")
     for check in (check_seniority, check_location):
         verdict = check(body)
         if not verdict.accepted:
@@ -620,11 +670,21 @@ IT_ENTRY_TITLE_PATTERN = re.compile(
 )
 
 
+def is_above_level_title(title: str) -> bool:
+    """Senior, Lead, Staff, Architect o Manager en el puesto mismo (no en la descripción del equipo)."""
+    title_lower = title.lower()
+    if LOWER_LEVEL_PATTERN.search(title_lower):
+        return False
+    return bool(SENIOR_PATTERN.search(title_lower) or ABOVE_LEVEL_TITLE_PATTERN.search(title_lower))
+
+
 def is_profile_title(title: str) -> bool:
     """Prefiltro de avisos de la sección Empleos: puesto dev y nivel que no sea Senior/Lead."""
     if not (is_dev_title(title) or IT_ENTRY_TITLE_PATTERN.search(title)) or NON_DEV_ROLE_PATTERN.search(title):
         return False
     if ABOVE_LEVEL_TITLE_PATTERN.search(title) or OFF_PROFILE_TITLE_PATTERN.search(title):
+        return False
+    if INDUSTRIAL_PATTERN.search(title):
         return False
     return check_seniority(title).accepted
 

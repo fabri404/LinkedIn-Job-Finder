@@ -1,7 +1,8 @@
 """relevance.py - Cuánto encaja una vacante con el perfil de Adriel (Python/FastAPI, QA, junior).
 
-No descarta nada: ordena la cola para que los borradores más acordes salgan primero cuando el cupo
-diario no alcanza para todos. Prioridades: nivel trainee/junior/semi senior (o sin aclarar) y
+Ordena la cola (los más acordes salen primero) y además filtra: debajo de MIN_DRAFT_RELEVANCE no se
+arma borrador y debajo de MIN_EASY_APPLY_RELEVANCE no se envía la Solicitud sencilla; quedan en la
+lista para revisar a mano. Medido 25–28/10: 42 % de la cola tenía relevancia ≤ 2. Prioridades: nivel trainee/junior/semi senior (o sin aclarar) y
 ubicación de adentro hacia afuera: Córdoba → resto de Argentina → Chile, Paraguay, Colombia, España,
 México → el resto.
 """
@@ -10,7 +11,14 @@ from __future__ import annotations
 
 import re
 
-from classifier import CORDOBA_TERMS, JobPosting, is_preferred_remote_country, split_post, work_modality
+from classifier import (
+    CORDOBA_TERMS,
+    JobPosting,
+    is_preferred_remote_country,
+    is_profile_title,
+    split_post,
+    work_modality,
+)
 
 # (peso, patrón). Cada patrón suma una vez en el cuerpo y otra en el puesto: el puesto pesa doble.
 RELEVANCE_RULES: tuple[tuple[int, re.Pattern[str]], ...] = (
@@ -20,9 +28,15 @@ RELEVANCE_RULES: tuple[tuple[int, re.Pattern[str]], ...] = (
     (3, re.compile(r"\b(junior|jr\.?|trainee|pasant[eí]a?|sin experiencia|entry level|primer empleo)\b")),
     (2, re.compile(r"\b(semi ?senior|ssr\.?|semisenior|mid[- ]level)\b")),
     # Lookarounds en vez de \b: ".net" y "c#" empiezan o terminan con un símbolo.
-    (-3, re.compile(r"(?<!\w)(java|asp\.net|\.net|c#|php|kotlin|sap|abap|salesforce|cobol|cnc)(?![\w#])")),
+    (-3, re.compile(r"(?<!\w)(java|asp\.net|\.net|c#|php|kotlin|sap|abap|salesforce|cobol|cnc|oracle forms|"
+                    r"sql server dba|dynamics 365|odoo)(?![\w#])")),
     (-1, re.compile(r"\b(swift|ios|android|flutter|angular|unity)\b")),
 )
+MIN_DRAFT_RELEVANCE = 2
+MIN_EASY_APPLY_RELEVANCE = 3
+# Stack que Adriel no usa: en el puesto mismo descarta aunque el resto sume ("Desarrollador .NET Jr").
+OFF_STACK_TITLE = re.compile(
+    r"(?<!\w)(java|\.net|c#|php|kotlin|android|ios|swift|oracle|sap|abap|salesforce|cobol|dynamics|odoo)(?![\w#])")
 # "Engineer"/"Ingeniero" sin nivel de entrada suele ser un puesto mid/senior: un poco más abajo.
 ENGINEER_TITLE = re.compile(r"\b(engineer|ingenier[oa])\b")
 ENTRY_LEVEL = re.compile(r"\b(junior|jr\.?|trainee|pasant|semi ?senior|ssr|entry level|i)\b")
@@ -45,3 +59,22 @@ def location_bonus(body: str) -> int:
     if any(place in body for place in ARGENTINA_PLACES):
         return 3
     return 2 if is_preferred_remote_country(body) else 0
+
+
+def is_off_stack_title(title: str) -> bool:
+    return bool(OFF_STACK_TITLE.search(title.lower()))
+
+
+def fit_for_draft(posting: JobPosting) -> tuple[bool, int]:
+    """(¿se arma el borrador?, relevancia). Hace falta un puesto IT legible ("Alert" o "un/a" no lo son),
+    sin stack ajeno y relevancia mínima."""
+    score = relevance_score(posting)
+    title = posting.role_title
+    ok = is_profile_title(title) and not is_off_stack_title(title) and score >= MIN_DRAFT_RELEVANCE
+    return ok, score
+
+
+def fit_for_easy_apply(posting: JobPosting) -> tuple[bool, int]:
+    """(¿se envía la Solicitud sencilla?, relevancia)."""
+    score = relevance_score(posting)
+    return not is_off_stack_title(posting.role_title) and score >= MIN_EASY_APPLY_RELEVANCE, score

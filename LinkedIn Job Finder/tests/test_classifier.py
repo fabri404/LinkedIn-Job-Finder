@@ -236,9 +236,17 @@ def test_evaluate_post_mexican_recruiter_email_with_remote_job_is_accepted():
     assert evaluate_post(text, KEYWORDS)[0].accepted
 
 
-def test_evaluate_post_mexican_recruiter_email_with_unknown_modality_is_accepted_just_in_case():
+def test_evaluate_post_mexican_recruiter_email_with_unknown_modality_is_rejected():
+    # Sin modalidad y con email de otro país: es presencial allá (regla desde 30/10/2026).
     text = ("Buscamos desarrollador/a web para un proyecto de CRM. Requisitos: 2 años con APIs y bases de "
             "datos. Enviá tu CV a contacto@ideaccion.com.mx")
+
+    assert not evaluate_post(text, KEYWORDS)[0].accepted
+
+
+def test_evaluate_post_without_modality_nor_place_is_accepted_just_in_case():
+    text = ("Buscamos desarrollador/a web para un proyecto de CRM. Requisitos: 2 años con APIs y bases de "
+            "datos. Enviá tu CV a contacto@ideaccion.com")
 
     assert evaluate_post(text, KEYWORDS)[0].accepted
 
@@ -320,12 +328,12 @@ def test_evaluate_post_indonesian_tester_post_is_rejected():
     assert not verdict.accepted
 
 
-def test_evaluate_post_foreign_post_without_modality_is_accepted_just_in_case():
-    # Preferencia: si no aclara modalidad, se postula igual (queda como borrador para revisar).
+def test_evaluate_post_foreign_post_without_modality_is_rejected():
+    # Sin modalidad pero con ciudad de otro país: es presencial allá. Solo sin lugar se postula por las dudas.
     text = ("Komal • HR Executive 1 día Seguir Zorko is Hiring - QA Tester! Experience: 1+ Year. "
             "Location: Vesu, Surat. Full-Time. Send your CV to: hr@zorko.com")
 
-    assert evaluate_post(text, KEYWORDS)[0].accepted
+    assert not evaluate_post(text, KEYWORDS)[0].accepted
 
 
 def test_evaluate_post_chilean_onsite_full_stack_post_is_rejected():

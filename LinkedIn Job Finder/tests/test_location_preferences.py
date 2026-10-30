@@ -47,11 +47,21 @@ def test_check_location_remote_for_residents_of_argentina_is_accepted():
 
 @pytest.mark.parametrize("text", [
     "Buscamos dev Python para nuestra sede de CABA.",
-    "Empresa de Bogotá, Colombia, busca dev Python.",
     "Buscamos desarrollador full stack 🇬🇹",
+    "Buscamos dev Python. Enviá tu CV a rrhh@empresa.com",
 ])
-def test_check_location_without_modality_anywhere_is_accepted_just_in_case(text):
+def test_check_location_without_modality_nor_foreign_place_is_accepted_just_in_case(text):
     assert check_location(text).accepted
+
+
+@pytest.mark.parametrize("text", [
+    "Empresa de Bogotá, Colombia, busca dev Python.",
+    "Junior Geophysicist. Full-time | Canada",
+    "QA/QC Technician (Metering). Job Location: Qatar. Send your CV at hr@edgewaterqatar.com",
+    "Buscamos dev Python. Enviá tu CV a rrhh@empresa.com.mx",
+])
+def test_check_location_without_modality_in_another_country_is_rejected(text):
+    assert not check_location(text).accepted
 
 
 def test_work_modality_no_presencial_is_remote():
