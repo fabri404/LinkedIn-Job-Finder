@@ -1,20 +1,14 @@
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
+
+import pytest
 
 import dashboard_data
 import loop_control
 import main
+from pacing import Pacer, PaceSettings
 from store import STATE_FILE, Store
-
-RUN = SimpleNamespace(pause_minutes_min=10, pause_minutes_max=10)
-
-
-def test_next_pause_minutes_doubles_per_idle_cycle_up_to_cap():
-    assert main.next_pause_minutes(RUN, 0) == 10
-    assert main.next_pause_minutes(RUN, 1) == 20
-    assert main.next_pause_minutes(RUN, 2) == 40
-    assert main.next_pause_minutes(RUN, 10) == main.MAX_PAUSE_MINUTES
 
 
 def test_store_load_migrates_old_seen_list_and_prunes_old_dates(tmp_path):
@@ -86,8 +80,6 @@ def test_retry_minutes_backs_off_after_consecutive_failures():
 
 def test_run_fresh_cycle_unexpected_error_is_logged_and_skips_the_source(monkeypatch, tmp_path):
     # Arrange
-    from types import SimpleNamespace
-
     store = Store(tmp_path)
     ctx = SimpleNamespace(settings=SimpleNamespace(chrome_profile_dir=tmp_path), store=store, current_source=4)
     monkeypatch.setattr(main, "open_feed", lambda _s: object())
@@ -100,3 +92,22 @@ def test_run_fresh_cycle_unexpected_error_is_logged_and_skips_the_source(monkeyp
     # Assert
     assert completed is False
     assert store.progress[main.CURSOR_KEY] == 5
+
+
+def test_run_loop_without_page_budget_rests_without_opening_chrome(monkeypatch, tmp_path):
+    # Arrange
+    store = Store(tmp_path)
+    pacer = Pacer(store, PaceSettings(), lambda: datetime(2026, 11, 2, 15, 0))
+    for _ in range(PaceSettings().hourly_pages):
+        pacer.count_page("https://www.linkedin.com/feed/")
+    ctx = SimpleNamespace(store=store, pacer=pacer, idle_cycles=0)
+    monkeypatch.setattr(main, "run_fresh_cycle", lambda *_: (_ for _ in ()).throw(AssertionError("abrió Chrome")))
+
+    def stop(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main.time, "sleep", stop)
+
+    # Act / Assert
+    with pytest.raises(KeyboardInterrupt):
+        main.run_loop(ctx, SimpleNamespace(once=False, dry_run=True))

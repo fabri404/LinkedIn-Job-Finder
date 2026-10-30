@@ -151,43 +151,6 @@ def compose(posting: JobPosting, to: str, cv_dir: Path) -> Application:
     )
 
 
-OUTREACH_ES = """{greeting}
-
-Te escribo porque trabajás en selección IT{vacancy}. Me gustaría que me tengas en cuenta para búsquedas actuales o futuras de {role}, remoto o en Córdoba.
-
-En pocas palabras:
-• Creé y desarrollo SE-AR Manager, un SaaS multi-tenant en Python/FastAPI, PostgreSQL y Flutter que usan negocios reales (searmanager.com.ar).
-{bullets}
-• Estudio la Tecnicatura en Programación (UTN) y tengo inglés C1. Estoy en Córdoba, Argentina.
-
-Te adjunto mi CV. ¡Gracias por tu tiempo!
-
-{signature}"""
-
-OUTREACH_EN = """{greeting}
-
-I'm reaching out because you recruit for IT roles{vacancy}. I'd love to be considered for current or future {role} positions, remote or in Córdoba.
-
-• I founded and develop SE-AR Manager, a multi-tenant SaaS in Python/FastAPI, PostgreSQL and Flutter used by real businesses (searmanager.com.ar).
-{bullets}
-• I'm studying Programming at UTN (Argentina) and my English level is C1. I'm based in Córdoba, Argentina.
-
-My CV is attached. Thanks for your time!
-
-{signature}"""
-OUTREACH_ROLE = {"es": "Desarrollador Backend Python o QA", "en": "Backend Python Developer or QA"}
-
-
-@dataclass(frozen=True)
-class Outreach:
-    """Borrador para un recruiter: `vacancy` es la búsqueda acorde que publicó (o None)."""
-
-    to: str
-    first_name: str
-    language: str
-    vacancy: JobPosting | None
-
-
 LINKEDIN_MESSAGE = ("Hola {name}, vi tu búsqueda de {role}. Soy desarrollador backend Python (FastAPI, PostgreSQL) "
                     "en Córdoba y desarrollo un SaaS propio en producción. Me gustaría postularme: "
                     "¿te puedo enviar mi CV? ¡Gracias!")
@@ -197,22 +160,3 @@ def linkedin_message(first_name: str, vacancy: JobPosting) -> str:
     """Mensaje corto para que Adriel lo pegue en LinkedIn cuando el recruiter no deja email."""
     role = clean_role(vacancy.role_title, vacancy.track, "es")
     return re.sub(r"\s+,", ",", LINKEDIN_MESSAGE.format(name=first_name, role=role))
-
-
-def compose_outreach(outreach: Outreach, cv_dir: Path) -> Application:
-    lang = outreach.language
-    track = outreach.vacancy.track if outreach.vacancy else "backend"
-    if outreach.vacancy:
-        role = clean_role(outreach.vacancy.role_title, track, lang)
-        vacancy = (f" y vi que publicaste la búsqueda de {role}" if lang == "es"
-                   else f" and saw your {role} opening")
-        subject = build_subject(outreach.vacancy, role)
-    else:
-        role, vacancy = OUTREACH_ROLE[lang], ""
-        subject = f"{role} - {CANDIDATE_NAME} {SUBJECT_TAIL[lang]}"
-    template = OUTREACH_ES if lang == "es" else OUTREACH_EN
-    hello = "Hola" if lang == "es" else "Hi"
-    greeting = f"{hello} {outreach.first_name}," if outreach.first_name else f"{hello},"
-    body = template.format(greeting=greeting, vacancy=vacancy, role=role,
-                           bullets=BULLETS[(track, lang)], signature=SIGNATURE)
-    return Application(outreach.to, subject, body, select_cv(cv_dir, track, lang), role)

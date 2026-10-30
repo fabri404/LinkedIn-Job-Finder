@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from pacing import PaceSettings
+
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -17,6 +19,12 @@ DEFAULT_PROFILE_DIR = Path.home() / ".config/linkedin-job-finder/chrome-profile"
 
 def _env_int(name: str, default: int) -> int:
     return int(os.getenv(name, str(default)))
+
+
+def _env_range(name: str, default: tuple[int, int]) -> tuple[int, int]:
+    """"8-23" → (8, 23)."""
+    low, _, high = os.getenv(name, f"{default[0]}-{default[1]}").partition("-")
+    return int(low), int(high)
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -45,6 +53,7 @@ class MailSettings:
 class Settings:
     run: RunSettings
     mail: MailSettings
+    pace: PaceSettings
     chrome_profile_dir: Path
     chrome_headless: bool
     state_dir: Path
@@ -58,17 +67,18 @@ def load_settings() -> Settings:
     run = RunSettings(
         scroll_minutes=_env_int("SCROLL_MINUTES", 8),
         channel_scroll_minutes=_env_int("CHANNEL_SCROLL_MINUTES", 2),
-        pause_minutes_min=_env_int("PAUSE_MINUTES_MIN", 8),
-        pause_minutes_max=_env_int("PAUSE_MINUTES_MAX", 15),
-        daily_send_limit=_env_int("DAILY_SEND_LIMIT", 100),
-        send_delay_min_s=_env_int("SEND_DELAY_MIN_S", 5),
-        send_delay_max_s=_env_int("SEND_DELAY_MAX_S", 15),
+        pause_minutes_min=_env_int("PAUSE_MINUTES_MIN", 25),
+        pause_minutes_max=_env_int("PAUSE_MINUTES_MAX", 50),
+        daily_send_limit=_env_int("DAILY_SEND_LIMIT", 40),
+        send_delay_min_s=_env_int("SEND_DELAY_MIN_S", 60),
+        send_delay_max_s=_env_int("SEND_DELAY_MAX_S", 180),
         easy_apply_daily_limit=_env_int("EASY_APPLY_DAILY_LIMIT", 25),
     )
     mail = MailSettings(cv_dir=_env_path("CV_DIR", DEFAULT_CV_DIR))
     return Settings(
         run=run,
         mail=mail,
+        pace=load_pace_settings(run),
         chrome_profile_dir=_env_path("CHROME_PROFILE_DIR", DEFAULT_PROFILE_DIR),
         chrome_headless=_env_int("CHROME_HEADLESS", 1) == 1,
         state_dir=_env_path("STATE_DIR", BASE_DIR / "data"),
@@ -76,6 +86,21 @@ def load_settings() -> Settings:
         channels_file=BASE_DIR / "channels.txt",
         job_queries_file=BASE_DIR / "job_queries.txt",
         recruiter_queries_file=BASE_DIR / "recruiter_queries.txt",
+    )
+
+
+def load_pace_settings(run: RunSettings) -> PaceSettings:
+    """Horario activo, topes de páginas con sesión y pausas (ver pacing.py)."""
+    active_start, active_end = _env_range("ACTIVE_HOURS", (8, 23))
+    night_min, night_max = _env_range("NIGHT_CYCLE_MINUTES", (120, 180))
+    return PaceSettings(
+        active_start=active_start,
+        active_end=active_end,
+        daily_pages=_env_int("DAILY_PAGE_BUDGET", 120),
+        hourly_pages=_env_int("HOURLY_PAGE_BUDGET", 25),
+        day_pause_minutes=(float(run.pause_minutes_min), float(run.pause_minutes_max)),
+        night_pause_minutes=(float(night_min), float(night_max)),
+        easy_apply_daily_limit=run.easy_apply_daily_limit,
     )
 
 

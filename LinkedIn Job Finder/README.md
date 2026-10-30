@@ -92,7 +92,7 @@ python3 dashboard.py --open   # http://localhost:8765
 
 | Botón | Qué hace |
 |---|---|
-| Iniciar loop | Corre 24/7 sin ventana (feed, grupos, búsquedas de publicaciones y Empleos) |
+| Iniciar loop | Corre 24/7 sin ventana (feed, grupos, búsquedas de publicaciones y Empleos), a ritmo reducido de noche |
 | Correr una vuelta | Una sola vuelta y termina |
 | Con ventana (login) | Abre Chrome visible para iniciar sesión o resolver una verificación de LinkedIn |
 | Detener | Cierra Chrome y guarda el estado |
@@ -133,25 +133,51 @@ programador
 
 ### Cómo se arma cada vuelta
 
-1. **Empleos** (HTTP, sin Chrome): búsquedas de `job_queries.txt` en la sección Empleos, solo avisos con
-   Solicitud sencilla de las últimas 24 h: Argentina remoto, Córdoba con cualquier modalidad y, rotando,
-   remoto en Chile, Paraguay, Colombia, España o México. Si el formulario queda completo con datos verificados
-   (`answers.py`), **la solicitud se envía**; si falta algo, se guarda en LinkedIn → Mis empleos → En curso.
-2. **Búsquedas de publicaciones** de `channels.txt` ("enviar cv" + un término), todas, primero.
-3. **Grupos y páginas de empresa**: 8 por vuelta, rotando.
-4. **Feed**, al final.
+1. **Recruiters** (solo de día, fuera del calentamiento): una búsqueda de personas por día y "Seguir"
+   a hasta 3 recruiters IT desde los resultados. No abre perfiles ni "Información de contacto".
+2. **Empleos** (búsqueda por HTTP, solo de día): búsquedas de `job_queries.txt` en la sección Empleos,
+   avisos con Solicitud sencilla de las últimas 24 h: Argentina remoto, Córdoba con cualquier modalidad y,
+   rotando, remoto en Chile, Paraguay, Colombia, España o México. Si el aviso llega a la relevancia mínima y
+   el formulario queda completo con datos verificados (`answers.py`), **la solicitud se envía**; si falta
+   algo, se guarda en LinkedIn → Mis empleos → En curso. Como mucho 3 por hora, con 10–20 min entre una y otra.
+3. **Búsquedas de publicaciones** de `channels.txt`: 6 por vuelta (2 de noche), rotando.
+4. **Grupos y páginas de empresa**: 3 por vuelta (ninguno de noche), rotando.
+5. **Feed**: un tramo de 4 min.
 
 Cada fuente se deja de scrollear cuando unas pocas lecturas seguidas no traen posts nuevos, y la
-fuente por la que va la vuelta queda guardada: un reinicio retoma desde ahí. Si una vuelta no
-encuentra nada, la pausa siguiente se duplica (tope 60 min).
+fuente por la que va la vuelta queda guardada: un reinicio retoma desde ahí.
+
+### Ritmo (`pacing.py`)
+
+El 28/10/2026 LinkedIn restringió la cuenta tras ~1.100 páginas en un día, también de madrugada. Desde
+entonces el loop navega como mucho ~120 páginas por día:
+
+| Horario | Ritmo |
+|---|---|
+| Día (`ACTIVE_HOURS`, 8–23 h) | Hasta 25 páginas por hora y 120 por día. Pausa de 25–50 min entre vueltas y un descanso de 1,5–3 h cada 3–4 vueltas. |
+| Noche | Una vuelta liviana cada 2–3 h (feed y 2 búsquedas), hasta 8 páginas por hora. Sin Solicitudes sencillas ni follows. |
+
+Frenos automáticos, guardados en `state.json` (sobreviven a un reinicio):
+
+- **5 búsquedas de publicaciones seguidas sin resultados**: LinkedIn las está limitando; no se piden por
+  12 h (24 h si vuelve a pasar en 48 h).
+- **429 en Empleos**: una hora sin pedir avisos.
+- **Checkpoint, login o authwall**: el loop se frena. Después corre una **semana de calentamiento**: mitad
+  de páginas, hasta 10 Solicitudes sencillas por día y sin follows.
 
 **Ubicación**: en Córdoba vale presencial, híbrido o remoto; fuera de Córdoba (otra provincia u otro
-país) solo remoto. Si el aviso no aclara la modalidad, se postula igual por las dudas. Presencial o
-híbrido en Córdoba y remoto en los países preferidos suben en la cola.
+país) solo remoto. Si el aviso no aclara la modalidad, se postula solo si no nombra otro país (ni tiene
+un email de otro país). Presencial o híbrido en Córdoba y remoto en los países preferidos suben en la cola.
 
-Las ofertas aptas con email van a la cola de borradores ordenadas por relevancia (Python/QA/junior
-primero, Java/.NET/PHP al final). Las aptas **sin email** quedan en la pestaña "Vacantes para
-contactar por LinkedIn" del dashboard con un mensaje sugerido.
+**Rol**: "QA" o "testing" cuentan solo con contexto de software; QA/QC, inspección e ingeniería de
+industria (petróleo, construcción, energía) se descartan. Senior, Lead o Architect en el puesto se
+descartan aunque el aviso nombre "junior" en otra parte.
+
+**Relevancia** (`relevance.py`): Python/QA/junior suman, Java/.NET/PHP/Android/Oracle restan. Hace falta
+relevancia ≥ 2 y un puesto IT legible para el borrador, y ≥ 3 sin stack ajeno en el puesto para la
+Solicitud sencilla. Lo que no llega queda en `contactar_linkedin.csv` o `empleos_linkedin.csv` para
+revisar a mano. Las aptas **sin email** quedan en la pestaña "Vacantes para contactar por LinkedIn" del
+dashboard con un mensaje sugerido.
 
 ### Variables de entorno — `.env`
 
@@ -162,8 +188,12 @@ contactar por LinkedIn" del dashboard con un mensaje sugerido.
 | `CHROME_PROFILE_DIR` | `~/.config/linkedin-job-finder/chrome-profile` | Perfil de Chrome del loop |
 | `SCROLL_MINUTES` | `8` | Tope de minutos de feed por vuelta |
 | `CHANNEL_SCROLL_MINUTES` | `2` | Tope de minutos por búsqueda, grupo o página |
-| `PAUSE_MINUTES_MIN` / `PAUSE_MINUTES_MAX` | `8` / `15` | Pausa base entre vueltas |
-| `DAILY_SEND_LIMIT` | `100` | Borradores de Gmail por día |
+| `PAUSE_MINUTES_MIN` / `PAUSE_MINUTES_MAX` | `25` / `50` | Pausa entre vueltas de día |
+| `ACTIVE_HOURS` | `8-23` | Horario de día; fuera de él, ritmo nocturno |
+| `NIGHT_CYCLE_MINUTES` | `120-180` | Pausa entre vueltas de noche |
+| `DAILY_PAGE_BUDGET` / `HOURLY_PAGE_BUDGET` | `120` / `25` | Páginas de LinkedIn con sesión por día y por hora |
+| `DAILY_SEND_LIMIT` | `40` | Borradores de Gmail por día |
+| `SEND_DELAY_MIN_S` / `SEND_DELAY_MAX_S` | `60` / `180` | Pausa entre borradores |
 | `EASY_APPLY_DAILY_LIMIT` | `25` | Solicitudes sencillas enviadas solas por día (`0` = solo guardar) |
 | `STATE_DIR` | `data/` | Estado, CSVs y logs |
 
@@ -171,10 +201,10 @@ contactar por LinkedIn" del dashboard con un mensaje sugerido.
 
 | Archivo | Contenido |
 |---|---|
-| `state.json` | Posts vistos (se olvidan a los 60 días), cola de borradores, progreso de la vuelta |
+| `state.json` | Posts vistos (se olvidan a los 60 días), cola de borradores, progreso de la vuelta, contadores de ritmo y enfriamientos |
 | `enviados.csv` | Borradores creados |
 | `empleos_linkedin.csv` | Avisos de Empleos y qué pasó con su Solicitud sencilla (`enviada`, `guardada incompleta`…) |
-| `contactar_linkedin.csv` | Vacantes aptas sin email, para escribir por LinkedIn |
+| `contactar_linkedin.csv` | Vacantes aptas sin email, para escribir por LinkedIn, y ofertas con email que no llegaron a la relevancia mínima ("revisar: …") |
 | `job_finder.log` | Actividad (lo que muestra el dashboard), rota a los 2 MB |
 | `audit.log` | Un renglón por post evaluado, con el motivo del descarte |
 | `descartar.txt` | Emails a sacar de la cola a mano (uno por línea) |
@@ -183,8 +213,9 @@ contactar por LinkedIn" del dashboard con un mensaje sugerido.
 
 - **Envía postulaciones**: las Solicitudes sencillas completas se envían solas (hasta
   `EASY_APPLY_DAILY_LIMIT` por día). Los mails nunca se envían: quedan como borradores en Gmail.
-- **Verificación de seguridad**: si LinkedIn pide un checkpoint, el loop se frena; resolvelo con
-  "Con ventana (login)" en el dashboard.
+- **Verificación de seguridad**: si LinkedIn pide un checkpoint, cierra la sesión o muestra el authwall, el
+  loop se frena; resolvelo con "Con ventana (login)" en el dashboard. Nunca se intenta saltear.
+- **Automatizar LinkedIn va contra sus términos**: el ritmo baja mucho el riesgo, pero no lo elimina.
 - **Recontacto**: a un mismo email no se le escribe dos veces por el mismo puesto, ni dos veces en 14 días.
 - **Liviano en segundo plano**: corre con prioridad baja (`nice`/`ionice`), Chrome sin imágenes,
   video ni fuentes mientras scrollea, y el dashboard solo consulta cada 15 s con la pestaña visible.

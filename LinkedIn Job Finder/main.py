@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """main.py - LinkedIn Job Finder v3.
 
-Loop 24/7: F5 al feed y a los canales → filtro → borrador en Gmail con el CV adjunto.
-Los borradores los revisa y envía el usuario.
+Loop 24/7: feed, canales y Empleos → filtro → borrador en Gmail con el CV adjunto o Solicitud
+sencilla. Los borradores los revisa y envía el usuario. El ritmo (cuánto navega y cuánto descansa,
+de día y de noche) lo decide pacing.Pacer.
 
 Uso:
     python3 main.py              # loop continuo, crea borradores en Gmail
@@ -21,7 +22,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import urllib3
@@ -33,12 +34,11 @@ from classifier import (
     JobPosting,
     evaluate_job,
     evaluate_post,
-    evaluate_vacancy,
     is_dev_title,
     is_profile_title,
     post_author,
 )
-from composer import URL_PATTERN, Application, Outreach, compose, compose_outreach, linkedin_message, select_cv
+from composer import URL_PATTERN, Application, compose, linkedin_message, select_cv
 from config import (
     BASE_DIR,
     RunSettings,
@@ -48,8 +48,8 @@ from config import (
     load_settings,
     validate_mail_settings,
 )
-from easy_apply import ApplyResult, EasyApplyFiller, safe_apply
-from feed import FeedPost, create_driver, safe_harvest, wait_for_login
+from easy_apply import SUBMITTED, ApplyResult, EasyApplyFiller, safe_apply
+from feed import PAGE_LISTENERS, AccountBlocked, FeedPost, create_driver, safe_harvest, wait_for_login
 from jobs import FETCH_ERRORS as JOB_FETCH_ERRORS
 from jobs import (
     COOLDOWN_AFTER_429_S,
@@ -64,23 +64,9 @@ from jobs import (
     searches_for_cycle,
 )
 from mailer import AuthError, GmailDraftWriter, MailError, wait_for_gmail_login
-from recruiters import QUERIES_PER_CYCLE as RECRUITER_QUERIES_PER_CYCLE
-from recruiters import (
-    DEAD_SESSION_ERRORS,
-    MAX_FOLLOWS_PER_DAY,
-    MAX_PROFILES_PER_DAY,
-    MAX_SEARCH_PAGE,
-    SEARCH_PAGES_PER_CYCLE,
-    MAX_PROFILES_PER_CYCLE,
-    RecruiterCard,
-    contact_email,
-    follow,
-    open_profile,
-    recent_posts,
-    recruiter_pause,
-    safe_search,
-)
-from relevance import relevance_score
+from pacing import CONTENT_SEARCH, EMPTY_SEARCHES_LIMIT, JOBS, Pacer
+from recruiters import MAX_SEARCH_PAGE, RecruiterCard, follow, follow_pause, safe_search
+from relevance import fit_for_draft, fit_for_easy_apply
 from sources import plan_sources
 from store import VETO_FILE, QueuedApplication, Store, normalize_role
 
@@ -90,12 +76,11 @@ log = logging.getLogger("job_finder")
 audit = logging.getLogger("job_finder.audit")
 LOG_MAX_BYTES = 2_000_000
 LOG_BACKUPS = 3
-# Sin nada nuevo en la vuelta, la pausa se duplica hasta este tope; con algo nuevo vuelve a la base.
-MAX_PAUSE_MINUTES = 60
 PREVIOUS_CONTACTS_FILE = BASE_DIR / "contactados_previos.txt"
-CHECKPOINT_PATH = "/checkpoint/"
 CURSOR_KEY = "source_cursor"
 ROTATION_KEY = "source_rotation"
+RECRUITER_QUERY_KEY = "recruiter_query"
+JOB_CYCLE_KEY = "job_cycle"
 
 Sender = Callable[[Application], None]
 SenderFactory = Callable[[webdriver.Chrome], Sender]
@@ -108,11 +93,10 @@ def _no_easy_apply(_driver: webdriver.Chrome | None) -> Applier:
 
 
 def easy_apply_factory(ctx: LoopContext) -> ApplierFactory:
-    """Solicitud sencilla que se envía sola mientras no se llegue a EASY_APPLY_DAILY_LIMIT en el día."""
-    limit = ctx.settings.run.easy_apply_daily_limit
+    """Solicitud sencilla que se envía sola mientras no se llegue al cupo del día (menor en calentamiento)."""
 
     def may_submit() -> bool:
-        return ctx.store.easy_applies_on(date.today()) < limit
+        return ctx.store.easy_applies_on(date.today()) < ctx.pacer.easy_apply_limit()
 
     def factory(driver: webdriver.Chrome | None) -> Applier:
         filler = EasyApplyFiller(driver, may_submit)
@@ -125,18 +109,15 @@ class LoopContext:
     def __init__(self, settings: Settings, store: Store, make_sender: SenderFactory) -> None:
         self.settings = settings
         self.store = store
+        self.pacer = Pacer(store, settings.pace)
         self.make_sender = make_sender
         self.make_applier: ApplierFactory = _no_easy_apply
         self.applier: Applier = _no_easy_apply(None)
         self.keywords = load_keywords(settings.keywords_file)
         self.channels = load_channels(settings.channels_file)
         self.job_queries = load_channels(settings.job_queries_file)
-        self.job_cycle = 0
-        self.jobs_paused_until = 0.0
         self.current_source = 0
         self.recruiter_queries = load_channels(settings.recruiter_queries_file)
-        self.recruiter_cycle = 0
-        self.follows: dict[str, int] = {}
         self.allow_follow = True
         self.gmail_checked = False
         self.found_last_cycle = 0
@@ -204,8 +185,12 @@ def _record_post_lead(post: FeedPost, posting: JobPosting, ctx: LoopContext) -> 
 
 
 def _enqueue_posting(posting: JobPosting, post_url: str, ctx: LoopContext) -> int:
+    fits, score = fit_for_draft(posting)
+    if not fits:
+        reason = f"relevancia {score}" if is_profile_title(posting.role_title) else "sin puesto claro"
+        _record_for_review(posting, post_url, ctx, reason)
+        return 0
     queued = 0
-    score = relevance_score(posting)
     for email in posting.emails:
         if ctx.store.is_known_recipient(email, posting.role_title):
             log.info("  ya contactado: %s", email)
@@ -215,6 +200,18 @@ def _enqueue_posting(posting: JobPosting, post_url: str, ctx: LoopContext) -> in
         log.info("  en cola (relevancia %d): %s | %s", score, email, posting.role_title)
         queued += 1
     return queued
+
+
+def _record_for_review(posting: JobPosting, post_url: str, ctx: LoopContext, reason: str) -> None:
+    """Oferta con email que no llega al mínimo para borrador: queda en contactar_linkedin.csv para mirarla
+    a mano, una vez por email y puesto."""
+    key = f"review:{','.join(posting.emails)}:{normalize_role(posting.role_title)}"
+    if ctx.store.is_seen(key):
+        return
+    ctx.store.mark_seen(key)
+    ctx.store.record_lead((date.today().isoformat(), "", "", posting.role_title or "?", post_url,
+                           " ".join(posting.emails), f"revisar: {reason}"))
+    log.info("  a revisar (%s): %s | %s", reason, " ".join(posting.emails), posting.role_title or "?")
 
 
 def drain_queue(store: Store, run: RunSettings, sender: Sender) -> int:
@@ -254,11 +251,18 @@ def harvest_sources(driver: webdriver.Chrome, ctx: LoopContext, drain: Callable[
     queda en el estado: un cuelgue o un reinicio retoman desde ahí en vez de volver a empezar.
     """
     progress = ctx.store.progress
-    sources = plan_sources(ctx.channels, ctx.settings.run, progress.get(ROTATION_KEY, 0))
+    sources = plan_sources(ctx.channels, ctx.settings.run, ctx.pacer.cycle_plan(progress.get(ROTATION_KEY, 0)))
     read = queued = sent = 0
     for index in sources_from_cursor(len(sources), progress.get(CURSOR_KEY, 0)):
+        if not ctx.pacer.has_page_budget():
+            log.info("Presupuesto de páginas agotado por ahora; sigo desde acá en la próxima vuelta.")
+            return read, queued, sent
         ctx.current_source = index
+        if sources[index].is_content_search and ctx.pacer.cooling(CONTENT_SEARCH):
+            continue
         posts = safe_harvest(driver, sources[index], ctx.store.is_seen)
+        if sources[index].is_content_search:
+            _watch_search_block(len(posts), ctx)
         read += len(posts)
         progress[CURSOR_KEY] = index + 1
         new = enqueue_new_posts(posts, ctx)
@@ -268,6 +272,14 @@ def harvest_sources(driver: webdriver.Chrome, ctx: LoopContext, drain: Callable[
     progress[CURSOR_KEY] = 0
     progress[ROTATION_KEY] = progress.get(ROTATION_KEY, 0) + 1
     return read, queued, sent
+
+
+def _watch_search_block(posts: int, ctx: LoopContext) -> None:
+    """Varias búsquedas seguidas sin un solo post: LinkedIn las está bloqueando; se dejan de pedir un rato."""
+    until = ctx.pacer.record_search_result(posts)
+    if until:
+        log.warning("Búsquedas de publicaciones vacías %d veces seguidas: LinkedIn las limita. "
+                    "Las retomo el %s.", EMPTY_SEARCHES_LIMIT, until.strftime("%d/%m %H:%M"))
 
 
 def sources_from_cursor(count: int, cursor: int) -> list[int]:
@@ -280,8 +292,7 @@ def sources_from_cursor(count: int, cursor: int) -> list[int]:
 def pause_jobs_if_rate_limited(exc: Exception, ctx: LoopContext, what: str) -> None:
     """Un 429 de LinkedIn pausa la sección Empleos una hora; otro error solo corta esta vuelta."""
     if is_rate_limited(exc):
-        ctx.jobs_paused_until = time.time() + COOLDOWN_AFTER_429_S
-        resume = datetime.fromtimestamp(ctx.jobs_paused_until).strftime("%H:%M")
+        resume = ctx.pacer.start_cooldown(JOBS, timedelta(seconds=COOLDOWN_AFTER_429_S)).strftime("%H:%M")
         log.warning("Empleos: LinkedIn limitó los pedidos (%s); retomo a las %s.", what, resume)
         return
     log.warning("Empleos: falló %s (%s); sigo en la próxima vuelta.", what, exc)
@@ -290,8 +301,9 @@ def pause_jobs_if_rate_limited(exc: Exception, ctx: LoopContext, what: str) -> N
 def new_job_cards(ctx: LoopContext) -> list[JobCard]:
     """Avisos de la sección Empleos que todavía no se evaluaron, sin repetir entre búsquedas."""
     cards: dict[str, JobCard] = {}
-    searches = searches_for_cycle(ctx.job_queries, ctx.job_cycle)
-    ctx.job_cycle += 1
+    cycle = ctx.store.progress.get(JOB_CYCLE_KEY, 0)
+    searches = searches_for_cycle(ctx.job_queries, cycle)
+    ctx.store.progress[JOB_CYCLE_KEY] = cycle + 1
     for query, scope in searches:
         try:
             found = search_cards(query, scope)
@@ -313,8 +325,25 @@ def process_job_card(card: JobCard, ctx: LoopContext) -> int:
         return 0
     if posting.emails:
         return _enqueue_posting(posting, card.url, ctx)
-    cv_path = select_cv(ctx.settings.mail.cv_dir, posting.track, posting.language)
-    result = ctx.applier(card.url, str(cv_path))
+    return _apply_or_list(card, posting, ctx)
+
+
+def _apply_or_list(card: JobCard, posting: JobPosting, ctx: LoopContext) -> int:
+    """Solicitud sencilla si encaja y no se postuló ya al mismo puesto en la misma empresa (los avisos se
+    republican con otro id); si no encaja, queda en la lista para revisar a mano."""
+    role_key = f"jobrole:{normalize_role(card.company)}:{normalize_role(card.title)}"
+    if ctx.store.is_seen(role_key):
+        audit.info("desc empleo ya postulado (mismo puesto y empresa) | %s | %s", card.title, card.company)
+        return 0
+    fits, score = fit_for_easy_apply(posting)
+    if fits:
+        cv_path = select_cv(ctx.settings.mail.cv_dir, posting.track, posting.language)
+        result = ctx.applier(card.url, str(cv_path))
+        ctx.store.mark_seen(role_key)
+        if result.status == SUBMITTED:
+            ctx.pacer.record_easy_apply()
+    else:
+        result = ApplyResult(f"relevancia {score}: revisar a mano")
     ctx.store.record_manual_job((datetime.now().isoformat(timespec="seconds"), card.title, card.company,
                                  card.location, card.url, result.status, "; ".join(result.missing)))
     log.info("EMPLEO → %s | %s | %s | %s", card.title, card.company, result.status, card.url)
@@ -329,8 +358,9 @@ def _evaluate_job_cards(cards: list[JobCard], ctx: LoopContext) -> int:
             audit.info("desc empleo título fuera del perfil | %s | %s", card.title, card.company)
             ctx.store.mark_seen(card.key)
             continue
-        if details == MAX_DETAILS_PER_CYCLE:
-            break  # el resto queda sin marcar como visto: se lee en la próxima vuelta
+        # Sin turno para una Solicitud sencilla (cupo, hora o intervalo), el resto se lee en otra vuelta.
+        if details == MAX_DETAILS_PER_CYCLE or not ctx.pacer.may_easy_apply(ctx.store.easy_applies_on(date.today())):
+            break
         details += 1
         try:
             found += process_job_card(card, ctx)
@@ -342,117 +372,44 @@ def _evaluate_job_cards(cards: list[JobCard], ctx: LoopContext) -> int:
 
 
 def harvest_job_listings(ctx: LoopContext) -> int:
-    """Sección Empleos de LinkedIn (HTTP, sin Chrome). Devuelve las postulaciones nuevas."""
-    if time.time() < ctx.jobs_paused_until:
+    """Sección Empleos de LinkedIn (búsqueda por HTTP; la Solicitud sencilla abre el aviso en Chrome).
+    Solo con turno para una Solicitud sencilla (de día, bajo los cupos) y fuera del enfriamiento por 429.
+    Devuelve las postulaciones nuevas."""
+    if ctx.pacer.cooling(JOBS) or not ctx.pacer.may_easy_apply(ctx.store.easy_applies_on(date.today())):
         return 0
     found = _evaluate_job_cards(new_job_cards(ctx), ctx)
     ctx.store.save()
     return found
 
 
-def new_recruiters(driver: webdriver.Chrome, ctx: LoopContext) -> list[RecruiterCard]:
-    """Recruiters IT de las búsquedas de esta vuelta que todavía no se visitaron."""
-    budget = min(MAX_PROFILES_PER_CYCLE, MAX_PROFILES_PER_DAY - ctx.store.visits_on(date.today()))
-    if budget <= 0:
-        return []
-    queries = queries_for_cycle(ctx.recruiter_queries, ctx.recruiter_cycle, RECRUITER_QUERIES_PER_CYCLE)
-    ctx.recruiter_cycle += 1
-    cards: dict[str, RecruiterCard] = {}
-    for query in queries:
-        cards.update(_unseen_recruiters(driver, query, ctx, budget - len(cards)))
-    return list(cards.values())[:budget]
-
-
-def _unseen_recruiters(driver: webdriver.Chrome, query: str, ctx: LoopContext, budget: int) -> dict[str, RecruiterCard]:
-    """Hasta `budget` recruiters sin visitar de `query`. Avanza de página (guardada en el estado) cuando
-    la actual queda toda visitada; al final de los resultados vuelve a la primera."""
-    unseen: dict[str, RecruiterCard] = {}
-    for _ in range(SEARCH_PAGES_PER_CYCLE):
-        page = ctx.store.search_pages.get(query, 1)
-        cards = safe_search(driver, query, page)
-        unseen.update((c.slug, c) for c in cards if not ctx.store.is_seen(c.key))
-        if len(unseen) > budget:
-            break
-        ctx.store.search_pages[query] = page + 1 if cards and page < MAX_SEARCH_PAGE else 1
-        if len(unseen) == budget or ctx.store.search_pages[query] == 1:
-            break
-    return unseen
-
-
-def _first_vacancy(posts: list[FeedPost], ctx: LoopContext) -> tuple[FeedPost, JobPosting] | None:
-    return next(((post, vacancy) for post in posts if (vacancy := evaluate_vacancy(post.text, ctx.keywords))),
-                None)
-
-
-def _record_linkedin_lead(card: RecruiterCard, found: tuple[FeedPost, JobPosting], ctx: LoopContext) -> None:
-    """Vacante acorde sin email del recruiter: queda para escribirle por LinkedIn o usar su link."""
-    post, vacancy = found
-    links = " ".join(dict.fromkeys(URL_PATTERN.findall(post.text)))
-    ctx.store.record_lead((date.today().isoformat(), card.name, card.profile_url, vacancy.role_title, post.url,
-                           links, linkedin_message(card.first_name, vacancy)))
-    log.info("LINKEDIN → %s | %s | %s", card.name, vacancy.role_title, card.profile_url)
-
-
-def _follow_if_allowed(driver: webdriver.Chrome, card: RecruiterCard, ctx: LoopContext) -> None:
-    today = date.today().isoformat()
-    if not ctx.allow_follow or ctx.follows.get(today, 0) >= MAX_FOLLOWS_PER_DAY:
+def harvest_recruiters(driver: webdriver.Chrome, ctx: LoopContext) -> None:
+    """Una búsqueda de personas por día y "Seguir" a unos pocos recruiters IT desde los resultados.
+    No abre perfiles: eso fue lo que LinkedIn marcó como acceso masivo a datos de perfiles."""
+    if not (ctx.allow_follow and ctx.recruiter_queries and ctx.pacer.may_search_people()):
         return
-    if follow(driver, card):
-        ctx.follows[today] = ctx.follows.get(today, 0) + 1
-        log.info("  Siguiendo a %s.", card.name)
+    index = ctx.store.progress.get(RECRUITER_QUERY_KEY, 0)
+    query = queries_for_cycle(ctx.recruiter_queries, index, 1)[0]
+    ctx.store.progress[RECRUITER_QUERY_KEY] = index + 1
+    page = ctx.store.search_pages.get(query, 1)
+    ctx.pacer.record_people_search()
+    unseen = [card for card in safe_search(driver, query, page) if not ctx.store.is_seen(card.key)]
+    if not unseen:
+        ctx.store.search_pages[query] = page + 1 if page < MAX_SEARCH_PAGE else 1
+    for card in unseen:
+        if not ctx.pacer.may_follow():
+            break
+        _follow(driver, card, ctx)
+    ctx.store.save()
 
 
-def process_recruiter(driver: webdriver.Chrome, card: RecruiterCard, ctx: LoopContext) -> int:
-    """Sus búsquedas recientes con email van como postulación; después se lo sigue y, si el perfil
-    muestra email, queda un borrador "téngame en cuenta" (con la vacante acorde si publicó una)."""
-    ctx.store.count_visit(date.today())
-    posts = recent_posts(driver, card)
-    queued = enqueue_new_posts(posts, ctx)
-    found = _first_vacancy(posts, ctx)
-    vacancy = found[1] if found else None
-    open_profile(driver, card)
-    _follow_if_allowed(driver, card, ctx)
-    email = contact_email(driver)
+def _follow(driver: webdriver.Chrome, card: RecruiterCard, ctx: LoopContext) -> None:
     ctx.store.mark_seen(card.key)
-    ctx.store.save()
-    if email is None or ctx.store.is_known_recipient(email):
-        if found and not queued:
-            _record_linkedin_lead(card, found, ctx)
-        return queued
-    language = vacancy.language if vacancy else "es"
-    first_name = card.first_name if card.owns_email(email) else ""
-    app = compose_outreach(Outreach(email, first_name, language, vacancy), ctx.settings.mail.cv_dir)
-    ctx.store.enqueue(QueuedApplication(app, card.profile_url))
-    ctx.store.save()
-    log.info("RECRUITER → %s | %s | %s | %s", card.name, email, app.subject,
-             "con vacante" if vacancy else "sin vacante reciente")
-    return queued + 1
-
-
-def stop_if_checkpoint(driver: webdriver.Chrome, ctx: LoopContext) -> None:
-    """LinkedIn pidió verificación de seguridad: se frena todo; la resuelve Adriel a mano."""
-    if CHECKPOINT_PATH not in driver.current_url:
+    if not follow(driver, card):
         return
+    ctx.pacer.record_follow()
     ctx.store.save()
-    log.error("LinkedIn pidió verificación de seguridad (checkpoint); freno el loop.")
-    raise SystemExit(2)
-
-
-def harvest_recruiters(driver: webdriver.Chrome, ctx: LoopContext) -> int:
-    """Visita hasta MAX_PROFILES_PER_CYCLE recruiters nuevos; devuelve los borradores encolados."""
-    queued = 0
-    for card in new_recruiters(driver, ctx):
-        try:
-            queued += process_recruiter(driver, card, ctx)
-        except DEAD_SESSION_ERRORS:
-            raise
-        except WebDriverException as exc:
-            log.warning("Recruiters: falló %s (%s).", card.profile_url, exc.msg)
-            ctx.store.mark_seen(card.key)
-        stop_if_checkpoint(driver, ctx)
-        recruiter_pause()
-    ctx.store.save()
-    return queued
+    log.info("  Siguiendo a %s (%s).", card.name, card.headline[:60])
+    follow_pause()
 
 
 def run_cycle(driver: webdriver.Chrome, ctx: LoopContext) -> None:
@@ -463,15 +420,15 @@ def run_cycle(driver: webdriver.Chrome, ctx: LoopContext) -> None:
         return drain_queue(ctx.store, ctx.settings.run, sender)
 
     sent = drain()  # lo que quedó de la vuelta anterior
-    recruiters = harvest_recruiters(driver, ctx)
-    # Empleos antes de las fuentes: con 45 fuentes la vuelta dura ~2 h y casi nunca llegaba al final.
+    harvest_recruiters(driver, ctx)
     jobs = harvest_job_listings(ctx)
     sent += drain()
     read, queued, sent_from_sources = harvest_sources(driver, ctx, drain)
     sent += sent_from_sources
-    ctx.found_last_cycle = queued + jobs + recruiters
-    log.info("Vuelta: %d posts, %d nuevos en cola, %d de Empleos, %d de recruiters, %d borradores, %d pendientes, "
-             "%d hoy.", read, queued, jobs, recruiters, sent, len(ctx.store.pending), ctx.store.sent_on(date.today()))
+    ctx.found_last_cycle = queued + jobs
+    log.info("Vuelta%s: %d posts, %d nuevos en cola, %d de Empleos, %d borradores, %d pendientes, %d hoy; "
+             "%d páginas de LinkedIn quedan en esta hora.", " nocturna" if ctx.pacer.is_night() else "", read,
+             queued, jobs, sent, len(ctx.store.pending), ctx.store.sent_on(date.today()), max(0, ctx.pacer.pages_left()))
 
 
 # Errores de un Chrome colgado o caído: el comando a chromedriver vence o se corta.
@@ -541,6 +498,9 @@ def run_fresh_cycle(ctx: LoopContext, dry_run: bool) -> bool:
 
 def run_loop(ctx: LoopContext, args: argparse.Namespace) -> None:
     while True:
+        if not (args.once or ctx.pacer.has_page_budget()):
+            _rest(ctx, "sin presupuesto de páginas de LinkedIn por ahora")  # ni siquiera abre Chrome
+            continue
         completed = run_fresh_cycle(ctx, args.dry_run)
         if args.once:
             return
@@ -552,20 +512,19 @@ def run_loop(ctx: LoopContext, args: argparse.Namespace) -> None:
             continue
         ctx.failed_cycles = 0
         ctx.idle_cycles = 0 if ctx.found_last_cycle else ctx.idle_cycles + 1
-        pause = next_pause_minutes(ctx.settings.run, ctx.idle_cycles)
-        log.info("Pausa de %.0f min antes del próximo F5 (%d vueltas seguidas sin novedades).", pause, ctx.idle_cycles)
-        time.sleep(pause * 60)
+        _rest(ctx, f"{ctx.idle_cycles} vueltas seguidas sin novedades")
+
+
+def _rest(ctx: LoopContext, why: str) -> None:
+    pause = ctx.pacer.next_pause_minutes(ctx.idle_cycles)
+    ctx.store.save()
+    log.info("Pausa de %.0f min antes de la próxima vuelta (%s).", pause, why)
+    time.sleep(pause * 60)
 
 
 def retry_minutes(failed_cycles: int) -> int:
     """1, 2, 4… minutos tras cada vuelta fallida seguida: un error que se repite no relanza Chrome cada minuto."""
     return min(MAX_RETRY_MINUTES, RETRY_AFTER_HANG_MINUTES * 2 ** min(failed_cycles - 1, 6))
-
-
-def next_pause_minutes(run: RunSettings, idle_cycles: int) -> float:
-    """Pausa base al azar, duplicada por cada vuelta seguida sin novedades, con tope MAX_PAUSE_MINUTES."""
-    base = random.uniform(run.pause_minutes_min, run.pause_minutes_max)
-    return min(MAX_PAUSE_MINUTES, base * 2 ** min(idle_cycles, 6))
 
 
 def _log_only(_driver: webdriver.Chrome) -> Sender:
@@ -602,14 +561,20 @@ def main() -> None:
     setup_logging(settings)
     factory = build_sender_factory(settings, args.dry_run)
     ctx = LoopContext(settings, load_store(settings, args.dry_run), factory)
+    PAGE_LISTENERS.append(ctx.pacer.count_page)
     ctx.make_applier = _no_easy_apply if args.dry_run else easy_apply_factory(ctx)
     ctx.allow_follow = not args.dry_run
-    log.info("Job Finder v3 | dry-run=%s | cupo diario %d | %d canales | %d en cola",
-             args.dry_run, settings.run.daily_send_limit, len(ctx.channels), len(ctx.store.pending))
+    log.info("Job Finder v3 | dry-run=%s | cupo diario %d | %d canales | %d en cola | calentamiento=%s",
+             args.dry_run, settings.run.daily_send_limit, len(ctx.channels), len(ctx.store.pending),
+             ctx.pacer.in_warmup())
     try:
         run_loop(ctx, args)
     except AuthError as exc:
         log.critical("%s. Loop detenido.", exc)
+    except AccountBlocked as exc:
+        ctx.pacer.mark_restricted()
+        log.critical("LinkedIn pidió verificación o cerró la sesión (%s); freno el loop. Resolvelo a mano con "
+                     "\"Con ventana (login)\"; al volver corre una semana a mitad de ritmo.", exc)
     except KeyboardInterrupt:
         log.info("Detenido por el usuario.")
     finally:

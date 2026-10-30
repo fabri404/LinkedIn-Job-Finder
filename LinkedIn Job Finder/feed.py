@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import (
@@ -43,6 +44,11 @@ MAX_RELOADS_PER_PAGE = 3
 WHEEL_TICKS = 4
 WHEEL_DELTA_PX = 300
 HEADLESS_WINDOW_SIZE = "1280,800"
+# Si LinkedIn manda acá en medio del loop, la sesión se cortó o la cuenta quedó bajo revisión:
+# se frena todo y lo resuelve Adriel a mano.
+BLOCKED_URL_MARKERS = ("/checkpoint/", "/authwall", "/login", "/uas/login", "/signup")
+# Funciones que se enteran de cada página abierta (pacing.Pacer.count_page lleva el presupuesto).
+PAGE_LISTENERS: list[Callable[[str], None]] = []
 # Servicios de fondo de Chrome que el loop no usa: red, CPU y memoria de más en cada vuelta.
 LIGHT_FLAGS = (
     "--disable-extensions", "--disable-background-networking", "--disable-component-update",
@@ -163,12 +169,34 @@ def hide_headless_user_agent(driver: webdriver.Chrome) -> None:
                            {"userAgent": user_agent.replace("HeadlessChrome", "Chrome")})
 
 
-def open_url(driver: webdriver.Chrome, url: str) -> None:
+def is_linkedin_url(url: str) -> bool:
+    """Por el host: el link de un borrador de Gmail lleva "linkedin.com" en la firma y no cuenta."""
+    host = urlparse(url).netloc.lower()
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+class AccountBlocked(Exception):
+    """LinkedIn pidió verificación, cerró la sesión o mostró el authwall en medio del loop."""
+
+
+def _load(driver: webdriver.Chrome, url: str) -> None:
     """driver.get tolerante: si la página tarda más del límite, sigue con lo que cargó."""
+    for listener in PAGE_LISTENERS:
+        listener(url)
     try:
         driver.get(url)
     except TimeoutException:
         log.warning("%s tardó más de %ds en cargar; sigo igual.", url, PAGE_LOAD_TIMEOUT_S)
+
+
+def open_url(driver: webdriver.Chrome, url: str) -> None:
+    """Abre `url`; si LinkedIn redirige a verificación, login o authwall, lanza AccountBlocked."""
+    _load(driver, url)
+    if not is_linkedin_url(url):
+        return
+    current = driver.current_url
+    if any(marker in current for marker in BLOCKED_URL_MARKERS):
+        raise AccountBlocked(current)
 
 
 def wait_for_login(driver: webdriver.Chrome, timeout_s: int = 900) -> bool:
@@ -177,7 +205,7 @@ def wait_for_login(driver: webdriver.Chrome, timeout_s: int = 900) -> bool:
     Si Chrome se cae mientras tanto (por ejemplo, al volver de una suspensión), el error se
     propaga: es pasajero y el loop reintenta con un Chrome nuevo en vez de terminar.
     """
-    open_url(driver, FEED_URL)
+    _load(driver, FEED_URL)  # al arrancar, el login es esperable: se espera a que Adriel entre
     deadline = time.time() + timeout_s
     if not driver.current_url.startswith(LOGGED_IN_PREFIX):
         log.warning("Iniciá sesión en LinkedIn en la ventana de Chrome (una sola vez; "

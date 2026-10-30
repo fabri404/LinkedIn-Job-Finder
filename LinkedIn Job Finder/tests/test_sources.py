@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from feed import FEED_URL, post_key
-from sources import PAGES_PER_CYCLE, PAGE_IDLE_LIMIT, SEARCH_IDLE_LIMIT, plan_sources
+from pacing import CyclePlan
+from sources import FEED_SEGMENT_MINUTES, PAGE_IDLE_LIMIT, SEARCH_IDLE_LIMIT, plan_sources
 
 RUN = SimpleNamespace(scroll_minutes=8, channel_scroll_minutes=2)
 SEARCH = "https://www.linkedin.com/search/results/content/?keywords=%22enviar%20cv%22"
@@ -9,26 +10,43 @@ SEARCH = "https://www.linkedin.com/search/results/content/?keywords=%22enviar%20
 
 def test_plan_sources_with_many_pages_rotates_a_window_per_cycle():
     # Arrange
-    pages = [f"https://www.linkedin.com/groups/{n}/" for n in range(PAGES_PER_CYCLE + 3)]
+    pages = [f"https://www.linkedin.com/groups/{n}/" for n in range(6)]
 
     # Act
-    first = plan_sources(pages + [SEARCH], RUN, 0)
-    second = plan_sources(pages + [SEARCH], RUN, 1)
+    first = plan_sources(pages + [SEARCH], RUN, CyclePlan(0, content_searches=6, pages=3))
+    second = plan_sources(pages + [SEARCH], RUN, CyclePlan(1, content_searches=6, pages=3))
 
     # Assert
     assert first[0].url == SEARCH and first[0].idle_limit == SEARCH_IDLE_LIMIT
     rotating = [s.url for s in first if "/groups/" in s.url]
-    assert len(rotating) == PAGES_PER_CYCLE
+    assert len(rotating) == 3
     assert rotating != [s.url for s in second if "/groups/" in s.url]
 
 
-def test_plan_sources_ends_with_feed_split_in_segments():
+def test_plan_sources_takes_only_a_rotating_window_of_content_searches():
+    # Arrange
+    searches = [f"{SEARCH}{n}" for n in range(41)]
+
     # Act
-    sources = plan_sources([], RUN, 0)
+    sources = plan_sources(searches, RUN, CyclePlan(1, content_searches=6, pages=3))
 
     # Assert
-    assert [s.url for s in sources] == [FEED_URL, FEED_URL]
-    assert all(s.minutes == 4 and s.idle_limit == PAGE_IDLE_LIMIT for s in sources)
+    assert [s.url for s in sources[:-1]] == searches[6:12]
+
+
+def test_plan_sources_ends_with_a_single_feed_segment():
+    # Act
+    sources = plan_sources([], RUN, CyclePlan(0, content_searches=6, pages=3))
+
+    # Assert
+    assert [s.url for s in sources] == [FEED_URL]
+    assert sources[0].minutes == FEED_SEGMENT_MINUTES and sources[0].idle_limit == PAGE_IDLE_LIMIT
+
+
+def test_plan_sources_without_searches_nor_pages_reads_only_the_feed():
+    sources = plan_sources([SEARCH, "https://www.linkedin.com/groups/1/"], RUN, CyclePlan(0, 0, 0))
+
+    assert [s.url for s in sources] == [FEED_URL]
 
 
 def test_post_key_ignores_social_context_line():

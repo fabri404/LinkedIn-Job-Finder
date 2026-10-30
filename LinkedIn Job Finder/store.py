@@ -29,6 +29,9 @@ RECONTACT_AFTER = timedelta(days=14)
 # Posts y avisos vistos se olvidan a los 60 días: nada tan viejo vuelve a aparecer en las búsquedas
 # (son de la última semana) y el estado deja de crecer sin límite.
 SEEN_RETENTION = timedelta(days=60)
+# Contadores de ritmo ("pages:2026-10-30", "pages:2026-10-30T14"): con una semana alcanza.
+COUNTER_RETENTION = timedelta(days=8)
+DAY_IN_KEY = re.compile(r"\d{4}-\d{2}-\d{2}")
 LEVEL_WORDS = re.compile(r"\b(junior|jr|semi ?senior|ssr|senior|sr|trainee|a|o|de|del|la|el)\b")
 
 
@@ -37,6 +40,13 @@ def normalize_role(role: str) -> str:
     text = unicodedata.normalize("NFKD", role.lower()).encode("ascii", "ignore").decode()
     text = LEVEL_WORDS.sub(" ", re.sub(r"[^a-z0-9#+ ]", " ", text))
     return " ".join(text.split())
+
+
+def _recent_counters(raw: dict[str, int]) -> dict[str, int]:
+    """Descarta los contadores con fecha de hace más de COUNTER_RETENTION; los que no tienen fecha quedan."""
+    cutoff = (date.today() - COUNTER_RETENTION).isoformat()
+    return {key: value for key, value in raw.items()
+            if not (day := DAY_IN_KEY.search(key)) or day.group(0) >= cutoff}
 
 
 def _recent_seen(raw: list[str] | dict[str, str]) -> dict[str, str]:
@@ -74,10 +84,13 @@ class Store:
     seen: dict[str, str] = field(default_factory=dict)  # clave → fecha en que se vio
     contacted: dict[str, str] = field(default_factory=dict)
     pending: list[QueuedApplication] = field(default_factory=list)
-    profile_visits: dict[str, int] = field(default_factory=dict)
     search_pages: dict[str, int] = field(default_factory=dict)
     # Fuente por la que sigue la vuelta y vuelta de rotación: sobreviven a un reinicio.
     progress: dict[str, int] = field(default_factory=dict)
+    # Ritmo (pacing.py): páginas por día y hora, follows, Solicitudes sencillas por hora…
+    counters: dict[str, int] = field(default_factory=dict)
+    # Momentos (epoch) que deben sobrevivir a un reinicio: fin de enfriamientos, última restricción.
+    marks: dict[str, float] = field(default_factory=dict)
     _saved: str = field(default="", repr=False, compare=False)
 
     @classmethod
@@ -89,8 +102,8 @@ class Store:
         data = json.loads(path.read_text(encoding="utf-8"))
         pending = [QueuedApplication.from_dict(item) for item in data.get("pending", [])]
         return cls(state_dir, _recent_seen(data.get("seen", {})), dict(data.get("contacted", {})), pending,
-                   dict(data.get("profile_visits", {})), dict(data.get("search_pages", {})),
-                   dict(data.get("progress", {})))
+                   dict(data.get("search_pages", {})), dict(data.get("progress", {})),
+                   _recent_counters(data.get("counters", {})), dict(data.get("marks", {})))
 
     def save(self) -> None:
         """Escribe state.json solo si algo cambió desde el último guardado (se llama tras cada fuente)."""
@@ -98,9 +111,10 @@ class Store:
             "seen": self.seen,
             "contacted": self.contacted,
             "pending": [item.to_dict() for item in self.pending],
-            "profile_visits": self.profile_visits,
             "search_pages": self.search_pages,
             "progress": self.progress,
+            "counters": self.counters,
+            "marks": self.marks,
         }
         payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         if payload == self._saved:
@@ -154,12 +168,13 @@ class Store:
         lines = path.read_text(encoding="utf-8").splitlines()
         return email.lower() in {line.strip().lower() for line in lines if line.strip()}
 
-    def visits_on(self, day: date) -> int:
-        return self.profile_visits.get(day.isoformat(), 0)
+    def counter(self, key: str) -> int:
+        return self.counters.get(key, 0)
 
-    def count_visit(self, day: date) -> None:
-        """Perfiles de recruiters abiertos por día: persiste para que reiniciar no reabra el cupo."""
-        self.profile_visits[day.isoformat()] = self.visits_on(day) + 1
+    def count(self, key: str) -> int:
+        """Suma uno al contador `key` y devuelve el valor nuevo."""
+        self.counters[key] = self.counter(key) + 1
+        return self.counters[key]
 
     def record_lead(self, row: tuple[str, ...]) -> None:
         self._append_csv(LEADS_CSV, LEADS_CSV_HEADER, row)
